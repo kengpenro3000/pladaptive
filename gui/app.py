@@ -61,13 +61,14 @@ class ScheduleScreen:
 
         # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags
         self.current_tab = 0
+        self.sidebar_collapsed = False
 
         # Containers
         self.today_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.all_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.tags_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.content_area = ft.Container(expand=True)
-        self.sidebar_area = ft.Container(width=260)
+        self.sidebar_area = ft.Container(width=260, animate_size=200)
 
     # ──────────────────────────────────────────
     # Priority & Formatting Helpers
@@ -192,8 +193,15 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     # Sidebar Builder
     # ──────────────────────────────────────────
+    def toggle_sidebar(self) -> None:
+        """Toggle sidebar between collapsed (icons only) and expanded."""
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        self.sidebar_area.width = 68 if self.sidebar_collapsed else 260
+        self._render_sidebar()
+        self.page.update()
+
     def _render_sidebar(self) -> None:
-        """Render the sidebar with brand, nav items, and statistics."""
+        """Render the sidebar with navigation items and statistics."""
         today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
         today_active = len([s for s in today_tasks if s.task.status != TaskStatus.COMPLETED])
         today_completed = len([s for s in today_tasks if s.task.status == TaskStatus.COMPLETED])
@@ -225,6 +233,19 @@ class ScheduleScreen:
             )
             text_color = ft.Colors.PRIMARY if is_active else ft.Colors.ON_SURFACE
             icon_color = ft.Colors.PRIMARY if is_active else ft.Colors.GREY_400
+
+            if self.sidebar_collapsed:
+                return ft.Container(
+                    content=ft.Icon(icon_name, color=icon_color, size=22),
+                    bgcolor=bg_color,
+                    border=border_style,
+                    border_radius=10,
+                    padding=10,
+                    alignment=ft.Alignment(0, 0),
+                    tooltip=f"{title} ({badge_text})" if badge_text else title,
+                    ink=True,
+                    on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
+                )
 
             row_controls: list[ft.Control] = [
                 ft.Icon(icon_name, color=icon_color, size=20),
@@ -262,44 +283,36 @@ class ScheduleScreen:
                 border_radius=10,
                 padding=ft.Padding(left=14, top=10, right=14, bottom=10),
                 ink=True,
-                on_click=lambda _: self.switch_tab(tab_idx),
+                on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
             )
 
-        # Brand header
-        brand_header = ft.Container(
-            padding=ft.Padding(left=6, top=8, right=6, bottom=16),
-            content=ft.Row(
-                spacing=12,
-                controls=[
-                    ft.Container(
-                        content=ft.Icon(
-                            ft.Icons.CHECKLIST_ROUNDED,
-                            color=ft.Colors.PRIMARY,
-                            size=28,
+        # Header with collapse/expand toggle button (no logo/app name)
+        if self.sidebar_collapsed:
+            top_header = ft.Container(
+                padding=ft.Padding(left=0, top=2, right=0, bottom=6),
+                alignment=ft.Alignment(0, 0),
+                content=ft.IconButton(
+                    icon=ft.Icons.MENU_ROUNDED,
+                    tooltip="Развернуть панель",
+                    icon_color=ft.Colors.GREY_400,
+                    on_click=lambda _: self.toggle_sidebar(),
+                ),
+            )
+        else:
+            top_header = ft.Container(
+                padding=ft.Padding(left=4, top=2, right=4, bottom=6),
+                content=ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.IconButton(
+                            icon=ft.Icons.MENU_OPEN_ROUNDED,
+                            tooltip="Свернуть панель",
+                            icon_color=ft.Colors.GREY_400,
+                            on_click=lambda _: self.toggle_sidebar(),
                         ),
-                        bgcolor=ft.Colors.with_opacity(0.15, ft.Colors.PRIMARY),
-                        padding=8,
-                        border_radius=10,
-                    ),
-                    ft.Column(
-                        spacing=2,
-                        controls=[
-                            ft.Text(
-                                "ПланАдаптив",
-                                size=18,
-                                weight=ft.FontWeight.BOLD,
-                                color=ft.Colors.ON_SURFACE,
-                            ),
-                            ft.Text(
-                                "Умное планирование",
-                                size=11,
-                                color=ft.Colors.GREY_400,
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-        )
+                    ],
+                ),
+            )
 
         # Navigation items
         nav_items = ft.Column(
@@ -352,20 +365,31 @@ class ScheduleScreen:
             ),
         )
 
+        bottom_compact = ft.Container(
+            alignment=ft.Alignment(0, 0),
+            padding=ft.Padding(left=0, top=4, right=0, bottom=4),
+            content=ft.IconButton(
+                icon=ft.Icons.QUERY_STATS_ROUNDED,
+                icon_color=ft.Colors.GREY_400,
+                tooltip=f"На сегодня: {today_active} | Всего: {all_active} | Завершено: {completed_total_count}",
+                on_click=lambda _: self.toggle_sidebar(),
+            ),
+        )
+
         self.sidebar_area.content = ft.Container(
             bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
             border_radius=14,
-            padding=14,
+            padding=ft.Padding(left=8, top=10, right=8, bottom=10) if self.sidebar_collapsed else 14,
             expand=True,
             content=ft.Column(
                 expand=True,
                 controls=[
-                    brand_header,
+                    top_header,
                     ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                    ft.Container(height=8),
+                    ft.Container(height=6),
                     nav_items,
                     ft.Container(expand=True),  # Push stats to bottom
-                    stats_panel,
+                    bottom_compact if self.sidebar_collapsed else stats_panel,
                 ],
             ),
         )
@@ -1227,7 +1251,7 @@ class ScheduleScreen:
 
     def render(self) -> None:
         """Assemble the complete layout (sidebar + content) on the page."""
-        self.page.title = "ПланАдаптив — Умное расписание"
+        self.page.title = "Умное расписание"
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.padding = 16
 
