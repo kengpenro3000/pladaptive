@@ -46,7 +46,7 @@ FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextBut
 class ScheduleScreen:
     """Renders and manages the main application view with sidebar and tabbed content."""
 
-    MIN_SIDEBAR_WIDTH = 180
+    MIN_SIDEBAR_WIDTH = 130
     MAX_SIDEBAR_WIDTH = 550
     COLLAPSED_SIDEBAR_WIDTH = 68
     DEFAULT_EXPANDED_WIDTH = 260
@@ -69,6 +69,7 @@ class ScheduleScreen:
         self.current_tab = 0
         self.sidebar_collapsed = False
         self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
+        self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
 
         # Containers
         self.today_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
@@ -204,37 +205,129 @@ class ScheduleScreen:
     # Sidebar Resizer & Builder (Zed-style)
     # ──────────────────────────────────────────
     def _build_resizer_handle(self) -> ft.Control:
-        """Create the resizer divider bar with drag detection, hover glow, and double-tap toggle."""
-        self.resizer_line = ft.Container(
-            width=2,
-            bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT),
-            border_radius=1,
+        """Create the resizer divider bar with drag detection, hover glow, and vertically-centered toggle button."""
+        def _make_line_segment() -> ft.Container:
+            return ft.Container(
+                width=2,
+                bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT),
+                border_radius=1,
+                expand=True,
+            )
+
+        self.resizer_top_line = _make_line_segment()
+        self.resizer_bottom_line = _make_line_segment()
+
+        self.collapse_btn_icon = ft.Icon(
+            icon=ft.Icons.CHEVRON_LEFT_ROUNDED if not self.sidebar_collapsed else ft.Icons.CHEVRON_RIGHT_ROUNDED,
+            size=14,
+            color=ft.Colors.GREY_300,
         )
 
-        def _on_hover(e: ft.HoverEvent) -> None:
+        def _on_btn_hover(e: ft.HoverEvent) -> None:
             is_hovered = str(getattr(e, "data", "")).lower() == "true" or getattr(e, "data", None) is True
-            self.resizer_line.bgcolor = (
-                ft.Colors.PRIMARY if is_hovered else ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT)
+            self.collapse_button_box.bgcolor = (
+                ft.Colors.SURFACE_CONTAINER_HIGHEST if is_hovered else ft.Colors.SURFACE_CONTAINER_HIGH
             )
-            self.resizer_line.width = 3 if is_hovered else 2
+            self.collapse_button_box.border = (
+                ft.Border.all(1, ft.Colors.PRIMARY)
+                if is_hovered
+                else ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.OUTLINE_VARIANT))
+            )
+            self.collapse_btn_icon.color = ft.Colors.PRIMARY if is_hovered else ft.Colors.GREY_300
             self.page.update()
 
-        return ft.GestureDetector(
+        self.collapse_button_box = ft.Container(
+            content=self.collapse_btn_icon,
+            width=18,
+            height=34,
+            border_radius=9,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.OUTLINE_VARIANT)),
+            alignment=ft.Alignment(0, 0),
+            tooltip="Свернуть панель" if not self.sidebar_collapsed else "Развернуть панель",
+            on_hover=_on_btn_hover,
+        )
+
+        self.collapse_button = ft.GestureDetector(
+            mouse_cursor=ft.MouseCursor.CLICK,
+            on_tap=lambda _: self.toggle_sidebar(),
+            on_pan_start=self._on_resizer_pan_start,
+            on_pan_update=self._on_resizer_pan_update,
+            on_pan_end=self._on_resizer_pan_end,
+            content=self.collapse_button_box,
+        )
+
+        def _on_line_hover(e: ft.HoverEvent) -> None:
+            is_hovered = str(getattr(e, "data", "")).lower() == "true" or getattr(e, "data", None) is True
+            color = ft.Colors.PRIMARY if is_hovered else ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT)
+            w = 3 if is_hovered else 2
+            self.resizer_top_line.bgcolor = color
+            self.resizer_top_line.width = w
+            self.resizer_bottom_line.bgcolor = color
+            self.resizer_bottom_line.width = w
+            self.page.update()
+
+        top_handle = ft.GestureDetector(
             mouse_cursor=ft.MouseCursor.RESIZE_LEFT_RIGHT,
             on_pan_start=self._on_resizer_pan_start,
             on_pan_update=self._on_resizer_pan_update,
+            on_pan_end=self._on_resizer_pan_end,
             on_double_tap=self._on_resizer_double_tap,
             content=ft.Container(
-                width=10,
+                width=18,
                 alignment=ft.Alignment(0, 0),
-                on_hover=_on_hover,
-                content=self.resizer_line,
+                expand=True,
+                on_hover=_on_line_hover,
+                content=self.resizer_top_line,
             ),
+            expand=True,
         )
+
+        bottom_handle = ft.GestureDetector(
+            mouse_cursor=ft.MouseCursor.RESIZE_LEFT_RIGHT,
+            on_pan_start=self._on_resizer_pan_start,
+            on_pan_update=self._on_resizer_pan_update,
+            on_pan_end=self._on_resizer_pan_end,
+            on_double_tap=self._on_resizer_double_tap,
+            content=ft.Container(
+                width=18,
+                alignment=ft.Alignment(0, 0),
+                expand=True,
+                on_hover=_on_line_hover,
+                content=self.resizer_bottom_line,
+            ),
+            expand=True,
+        )
+
+        return ft.Column(
+            width=18,
+            spacing=0,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                top_handle,
+                self.collapse_button,
+                bottom_handle,
+            ],
+        )
+
+    def _update_resizer_button(self) -> None:
+        """Update resizer button icon and tooltip according to sidebar state."""
+        if hasattr(self, "collapse_btn_icon") and self.collapse_btn_icon:
+            self.collapse_btn_icon.icon = (
+                ft.Icons.CHEVRON_RIGHT_ROUNDED if self.sidebar_collapsed else ft.Icons.CHEVRON_LEFT_ROUNDED
+            )
+        if hasattr(self, "collapse_button_box") and self.collapse_button_box:
+            self.collapse_button_box.tooltip = (
+                "Развернуть панель" if self.sidebar_collapsed else "Свернуть панель"
+            )
 
     def _on_resizer_pan_start(self, e: ft.DragStartEvent) -> None:
         """Disable animation during manual drag for immediate 1:1 response."""
         self.sidebar_area.animate_size = None
+        self._drag_width = float(
+            self.sidebar_area.width
+            or (self.COLLAPSED_SIDEBAR_WIDTH if self.sidebar_collapsed else self.DEFAULT_EXPANDED_WIDTH)
+        )
 
     def _on_resizer_pan_update(self, e: ft.DragUpdateEvent) -> None:
         """Adjust sidebar width smoothly as user drags horizontally."""
@@ -251,29 +344,42 @@ class ScheduleScreen:
         if not dx:
             return
 
-        current_w = self.sidebar_area.width or self.DEFAULT_EXPANDED_WIDTH
-        new_w = current_w + dx
-
         if self.sidebar_collapsed:
-            if new_w > self.COLLAPSE_THRESHOLD:
+            self._drag_width = max(float(self.COLLAPSED_SIDEBAR_WIDTH), self._drag_width + dx)
+
+            # When pulling right past 130px, expand into normal mode
+            if self._drag_width > self.COLLAPSE_THRESHOLD:
                 self.sidebar_collapsed = False
-                expanded_w = max(self.MIN_SIDEBAR_WIDTH, min(new_w, self.MAX_SIDEBAR_WIDTH))
+                expanded_w = min(self.MAX_SIDEBAR_WIDTH, self._drag_width)
                 self.saved_expanded_width = expanded_w
                 self.sidebar_area.width = expanded_w
                 self._render_sidebar()
+                self._update_resizer_button()
                 self.page.update()
         else:
-            if new_w < self.COLLAPSE_THRESHOLD:
+            self._drag_width += dx
+
+            # When dragging left down to or below 130px, collapse into compact mode
+            if self._drag_width <= self.COLLAPSE_THRESHOLD:
                 self.sidebar_collapsed = True
                 self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+                self._drag_width = float(self.COLLAPSED_SIDEBAR_WIDTH)
                 self._render_sidebar()
+                self._update_resizer_button()
                 self.page.update()
             else:
-                clamped_w = max(self.MIN_SIDEBAR_WIDTH, min(new_w, self.MAX_SIDEBAR_WIDTH))
-                if clamped_w != current_w:
+                clamped_w = min(self.MAX_SIDEBAR_WIDTH, max(self.MIN_SIDEBAR_WIDTH, self._drag_width))
+                if clamped_w != self.sidebar_area.width:
                     self.saved_expanded_width = clamped_w
                     self.sidebar_area.width = clamped_w
                     self.page.update()
+
+    def _on_resizer_pan_end(self, e: ft.DragEndEvent) -> None:
+        """Finalize drag gesture and store chosen width."""
+        if not self.sidebar_collapsed and self.sidebar_area.width:
+            self.saved_expanded_width = self.sidebar_area.width
+        self._update_resizer_button()
+        self.page.update()
 
     def _on_resizer_double_tap(self, e: ft.ControlEvent) -> None:
         """Double tap resets to default expanded width or toggles collapsed state."""
@@ -282,14 +388,18 @@ class ScheduleScreen:
             self.sidebar_collapsed = False
             self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
             self.sidebar_area.width = self.DEFAULT_EXPANDED_WIDTH
+            self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
         else:
             if self.sidebar_area.width != self.DEFAULT_EXPANDED_WIDTH:
                 self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
                 self.sidebar_area.width = self.DEFAULT_EXPANDED_WIDTH
+                self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
             else:
                 self.sidebar_collapsed = True
                 self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+                self._drag_width = float(self.COLLAPSED_SIDEBAR_WIDTH)
         self._render_sidebar()
+        self._update_resizer_button()
         self.page.update()
 
     def toggle_sidebar(self) -> None:
@@ -298,9 +408,13 @@ class ScheduleScreen:
         self.sidebar_area.animate_size = 200
         if self.sidebar_collapsed:
             self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+            self._drag_width = float(self.COLLAPSED_SIDEBAR_WIDTH)
         else:
-            self.sidebar_area.width = max(self.MIN_SIDEBAR_WIDTH, self.saved_expanded_width)
+            expanded_w = max(self.MIN_SIDEBAR_WIDTH, self.saved_expanded_width)
+            self.sidebar_area.width = expanded_w
+            self._drag_width = float(expanded_w)
         self._render_sidebar()
+        self._update_resizer_button()
         self.page.update()
 
     def _render_sidebar(self) -> None:
@@ -356,8 +470,10 @@ class ScheduleScreen:
                     title,
                     color=text_color,
                     weight=ft.FontWeight.BOLD if is_active else ft.FontWeight.W_500,
-                    size=14,
+                    size=13,
                     expand=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ]
             if badge_text is not None:
@@ -374,7 +490,7 @@ class ScheduleScreen:
                             if is_active
                             else ft.Colors.SURFACE_CONTAINER_HIGHEST
                         ),
-                        padding=ft.Padding(left=8, top=2, right=8, bottom=2),
+                        padding=ft.Padding(left=7, top=2, right=7, bottom=2),
                         border_radius=10,
                     )
                 )
@@ -384,37 +500,9 @@ class ScheduleScreen:
                 bgcolor=bg_color,
                 border=border_style,
                 border_radius=10,
-                padding=ft.Padding(left=14, top=10, right=14, bottom=10),
+                padding=ft.Padding(left=12, top=10, right=12, bottom=10),
                 ink=True,
                 on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
-            )
-
-        # Header with collapse/expand toggle button (no logo/app name)
-        if self.sidebar_collapsed:
-            top_header = ft.Container(
-                padding=ft.Padding(left=0, top=2, right=0, bottom=6),
-                alignment=ft.Alignment(0, 0),
-                content=ft.IconButton(
-                    icon=ft.Icons.MENU_ROUNDED,
-                    tooltip="Развернуть панель",
-                    icon_color=ft.Colors.GREY_400,
-                    on_click=lambda _: self.toggle_sidebar(),
-                ),
-            )
-        else:
-            top_header = ft.Container(
-                padding=ft.Padding(left=4, top=2, right=4, bottom=6),
-                content=ft.Row(
-                    alignment=ft.MainAxisAlignment.END,
-                    controls=[
-                        ft.IconButton(
-                            icon=ft.Icons.MENU_OPEN_ROUNDED,
-                            tooltip="Свернуть панель",
-                            icon_color=ft.Colors.GREY_400,
-                            on_click=lambda _: self.toggle_sidebar(),
-                        ),
-                    ],
-                ),
             )
 
         # Navigation items
@@ -439,28 +527,28 @@ class ScheduleScreen:
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("На сегодня (активно):", size=11, color=ft.Colors.GREY_400),
+                            ft.Text("На сегодня (активно):", size=11, color=ft.Colors.GREY_400, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(str(today_active), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
                         ],
                     ),
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("Завершено сегодня:", size=11, color=ft.Colors.GREY_400),
+                            ft.Text("Завершено сегодня:", size=11, color=ft.Colors.GREY_400, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(str(today_completed), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_400),
                         ],
                     ),
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("Всего активных:", size=11, color=ft.Colors.GREY_400),
+                            ft.Text("Всего активных:", size=11, color=ft.Colors.GREY_400, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(str(all_active), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_300),
                         ],
                     ),
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("Завершено за всё время:", size=11, color=ft.Colors.GREY_400),
+                            ft.Text("Завершено за всё время:", size=11, color=ft.Colors.GREY_400, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(str(completed_total_count), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
                         ],
                     ),
@@ -482,14 +570,11 @@ class ScheduleScreen:
         self.sidebar_area.content = ft.Container(
             bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
             border_radius=14,
-            padding=ft.Padding(left=8, top=10, right=8, bottom=10) if self.sidebar_collapsed else 14,
+            padding=ft.Padding(left=8, top=12, right=8, bottom=12) if self.sidebar_collapsed else ft.Padding(left=12, top=12, right=12, bottom=12),
             expand=True,
             content=ft.Column(
                 expand=True,
                 controls=[
-                    top_header,
-                    ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                    ft.Container(height=6),
                     nav_items,
                     ft.Container(expand=True),  # Push stats to bottom
                     bottom_compact if self.sidebar_collapsed else stats_panel,
@@ -1367,6 +1452,7 @@ class ScheduleScreen:
             ft.Row(
                 expand=True,
                 spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
                     self.sidebar_area,
                     self.resizer_handle,
