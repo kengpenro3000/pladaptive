@@ -55,12 +55,14 @@ class TaskPriority(str, enum.Enum):
 # Subject
 # ──────────────────────────────────────────────
 class Subject(Base):
-    """University subject (or any category) that groups tasks."""
+    """Subject / Tag with custom color and UTF icon that groups tasks."""
 
     __tablename__ = "subjects"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    color: Mapped[str] = mapped_column(String(32), default="#4CAF50", server_default="#4CAF50", nullable=False)
+    icon: Mapped[str] = mapped_column(String(16), default="🏷️", server_default="🏷️", nullable=False)
 
     # one-to-many → Task
     tasks: Mapped[list[Task]] = relationship(
@@ -70,7 +72,7 @@ class Subject(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Subject(id={self.id}, name={self.name!r})>"
+        return f"<Subject(id={self.id}, name={self.name!r}, icon={self.icon!r}, color={self.color!r})>"
 
 
 # ──────────────────────────────────────────────

@@ -44,7 +44,17 @@ def get_session():
 
 
 def init_db() -> None:
-    """Create all tables that don't yet exist in the database."""
+    """Create all tables that don't yet exist in the database and ensure columns exist."""
     from database.models import Base  # local import to avoid circular deps
 
     Base.metadata.create_all(bind=engine)
+
+    # SQLite migration: ensure color and icon columns exist on subjects table
+    with engine.connect() as conn:
+        res = conn.exec_driver_sql("PRAGMA table_info(subjects)").fetchall()
+        cols = [r[1] for r in res]
+        if "color" not in cols:
+            conn.exec_driver_sql("ALTER TABLE subjects ADD COLUMN color VARCHAR(32) NOT NULL DEFAULT '#4CAF50'")
+        if "icon" not in cols:
+            conn.exec_driver_sql("ALTER TABLE subjects ADD COLUMN icon VARCHAR(16) NOT NULL DEFAULT '🏷️'")
+        conn.commit()

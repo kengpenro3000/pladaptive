@@ -53,20 +53,58 @@ class TaskManager:
         _init_db()
 
     # ──────────────────────────────────────────
-    # Subject CRUD
+    # Subject / Tag CRUD
     # ──────────────────────────────────────────
-    def add_subject(self, name: str) -> Subject:
-        """Create a new subject and return the persisted instance.
+    def add_subject(
+        self,
+        name: str,
+        color: str = "#4CAF50",
+        icon: str = "🏷️",
+    ) -> Subject:
+        """Create a new subject/tag and return the persisted instance.
 
         Raises:
             sqlalchemy.exc.IntegrityError: if a subject with the same name
                 already exists.
         """
         with self._session() as session:
-            subject = Subject(name=name)
+            subject = Subject(name=name, color=color, icon=icon)
             session.add(subject)
             session.flush()          # populate subject.id before commit
             return subject
+
+    def update_subject(
+        self,
+        subject_id: int,
+        *,
+        name: str | None = None,
+        color: str | None = None,
+        icon: str | None = None,
+    ) -> Subject:
+        """Update an existing subject/tag's properties."""
+        with self._session() as session:
+            subject = session.get(Subject, subject_id)
+            if subject is None:
+                raise ValueError(f"Subject with id={subject_id} not found.")
+
+            if name is not None:
+                subject.name = name
+            if color is not None:
+                subject.color = color
+            if icon is not None:
+                subject.icon = icon
+
+            session.flush()
+            return subject
+
+    def delete_subject(self, subject_id: int) -> bool:
+        """Delete a subject/tag by its ID (cascades to related tasks)."""
+        with self._session() as session:
+            subject = session.get(Subject, subject_id)
+            if subject is None:
+                return False
+            session.delete(subject)
+            return True
 
     def get_all_subjects(self) -> list[Subject]:
         """Return every subject ordered by name."""
@@ -117,7 +155,7 @@ class TaskManager:
             task = Task(
                 name=name,
                 description=description,
-                subject_id=subject_id,
+                subject=subject,
                 priority=priority,
                 expected_time=expected_time,
                 deadline=deadline,
@@ -125,6 +163,7 @@ class TaskManager:
             )
             session.add(task)
             session.flush()
+            _ = task.subject
 
         # Run prediction after session closes to avoid nested transactions
         if expected_time is not None:
@@ -156,7 +195,7 @@ class TaskManager:
     def get_all_tasks(self) -> list[Task]:
         """Return every task ordered by deadline (nulls last), then priority."""
         with self._session() as session:
-            return (
+            tasks = (
                 session.query(Task)
                 .order_by(
                     Task.deadline.is_(None),   # NULLs go last
@@ -165,21 +204,30 @@ class TaskManager:
                 )
                 .all()
             )
+            for t in tasks:
+                _ = t.subject
+            return tasks
 
     def get_tasks_by_subject(self, subject_id: int) -> list[Task]:
         """Return all tasks belonging to a given subject."""
         with self._session() as session:
-            return (
+            tasks = (
                 session.query(Task)
                 .filter(Task.subject_id == subject_id)
                 .order_by(Task.deadline)
                 .all()
             )
+            for t in tasks:
+                _ = t.subject
+            return tasks
 
     def get_task_by_id(self, task_id: int) -> Task | None:
         """Return a single task or ``None``."""
         with self._session() as session:
-            return session.get(Task, task_id)
+            task = session.get(Task, task_id)
+            if task is not None:
+                _ = task.subject
+            return task
 
     def update_task(
         self,
@@ -208,7 +256,7 @@ class TaskManager:
                 subject = session.get(Subject, subject_id)
                 if subject is None:
                     raise ValueError(f"Subject with id={subject_id} not found.")
-                task.subject_id = subject_id
+                task.subject = subject
 
             if name is not None:
                 task.name = name
@@ -222,6 +270,7 @@ class TaskManager:
                 task.deadline = deadline
 
             session.flush()
+            _ = task.subject
 
         # Update prediction if expected_time is available
         if task.expected_time is not None:

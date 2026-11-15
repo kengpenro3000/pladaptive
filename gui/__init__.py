@@ -8,6 +8,8 @@ from gui.forms import (
     open_task_edit_dialog,
     TaskCompleteDialog,
     open_task_complete_dialog,
+    TagDialog,
+    open_tag_dialog,
 )
 
 __all__ = [
@@ -19,4 +21,6 @@ __all__ = [
     "open_task_edit_dialog",
     "TaskCompleteDialog",
     "open_task_complete_dialog",
+    "TagDialog",
+    "open_tag_dialog",
 ]

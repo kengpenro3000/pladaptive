@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import flet as ft
 
 from core.task_manager import TaskManager
-from database.models import Task, TaskPriority
+from database.models import Subject, Task, TaskPriority
 
 
 def _show_dialog(page: ft.Page, dialog: ft.AlertDialog) -> None:
@@ -102,12 +102,12 @@ class TaskCreateDialog:
 
         subjects = self.task_manager.get_all_subjects()
         subject_options = [
-            ft.dropdown.Option(key=str(s.id), text=s.name)
+            ft.dropdown.Option(key=str(s.id), text=f"{getattr(s, 'icon', '🏷️')} {s.name}")
             for s in subjects
         ]
         self.subject_dropdown = ft.Dropdown(
-            label="Предмет*",
-            hint_text="Выберите предмет",
+            label="Тег / Предмет*",
+            hint_text="Выберите тег",
             options=subject_options,
             value=subject_options[0].key if subject_options else None,
         )
@@ -217,10 +217,10 @@ class TaskCreateDialog:
         else:
             self.name_field.error_text = None
 
-        # Subject
+        # Subject / Tag
         subject_id_raw = self.subject_dropdown.value
         if not subject_id_raw:
-            self.subject_dropdown.error_text = "Выберите предмет"
+            self.subject_dropdown.error_text = "Выберите тег"
             has_error = True
         else:
             self.subject_dropdown.error_text = None
@@ -351,12 +351,12 @@ class TaskEditDialog:
 
         subjects = self.task_manager.get_all_subjects()
         subject_options = [
-            ft.dropdown.Option(key=str(s.id), text=s.name)
+            ft.dropdown.Option(key=str(s.id), text=f"{getattr(s, 'icon', '🏷️')} {s.name}")
             for s in subjects
         ]
         self.subject_dropdown = ft.Dropdown(
-            label="Предмет*",
-            hint_text="Выберите предмет",
+            label="Тег / Предмет*",
+            hint_text="Выберите тег",
             options=subject_options,
             value=str(task.subject_id),
         )
@@ -475,10 +475,10 @@ class TaskEditDialog:
         else:
             self.name_field.error_text = None
 
-        # Subject
+        # Subject / Tag
         subject_id_raw = self.subject_dropdown.value
         if not subject_id_raw:
-            self.subject_dropdown.error_text = "Выберите предмет"
+            self.subject_dropdown.error_text = "Выберите тег"
             has_error = True
         else:
             self.subject_dropdown.error_text = None
@@ -718,3 +718,211 @@ def open_task_complete_dialog(
     )
     form.show()
     return form
+
+
+class TagDialog:
+    """Modal dialog for creating or editing a Tag / Subject."""
+
+    PRESET_ICONS = ["📚", "💻", "🔬", "📐", "🎨", "📝", "💡", "⚡", "🎯", "🌐", "🧪", "📈", "☕", "🚀", "🏷️", "💼"]
+    PRESET_COLORS = ["#4CAF50", "#2196F3", "#9C27B0", "#FF9800", "#E91E63", "#F44336", "#00BCD4", "#FFC107", "#607D8B", "#3F51B5"]
+
+    def __init__(
+        self,
+        page: ft.Page,
+        tag: Subject | None = None,
+        task_manager: TaskManager | None = None,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        self.page = page
+        self.tag = tag
+        self.task_manager = task_manager or TaskManager()
+        self.on_success = on_success
+
+        is_edit = tag is not None
+        title_text = "Редактирование тега" if is_edit else "Новый тег"
+        title_icon = ft.Icons.EDIT_ROUNDED if is_edit else ft.Icons.LOCAL_OFFER_ROUNDED
+
+        self.name_field = ft.TextField(
+            label="Название тега / предмета*",
+            value=tag.name if is_edit else "",
+            hint_text="Например: Программирование",
+            autofocus=True,
+            on_change=lambda _: self._update_preview(),
+        )
+
+        self.icon_field = ft.TextField(
+            label="UTF-иконка / Эмодзи*",
+            value=tag.icon if is_edit else "🏷️",
+            hint_text="Например: 💻",
+            max_length=4,
+            width=140,
+            on_change=lambda _: self._update_preview(),
+        )
+
+        self.color_field = ft.TextField(
+            label="Цвет (HEX-код)*",
+            value=tag.color if is_edit else "#4CAF50",
+            hint_text="#4CAF50",
+            max_length=9,
+            width=180,
+            on_change=lambda _: self._update_preview(),
+        )
+
+        # Quick icon chips
+        icon_chips = [
+            ft.Container(
+                content=ft.Text(ico, size=18),
+                padding=6,
+                border_radius=8,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                ink=True,
+                tooltip=f"Выбрать {ico}",
+                on_click=lambda _, i=ico: self._select_icon(i),
+            )
+            for ico in self.PRESET_ICONS
+        ]
+
+        # Quick color circles
+        color_chips = [
+            ft.Container(
+                width=26,
+                height=26,
+                border_radius=13,
+                bgcolor=col,
+                ink=True,
+                tooltip=col,
+                on_click=lambda _, c=col: self._select_color(c),
+            )
+            for col in self.PRESET_COLORS
+        ]
+
+        # Live preview container
+        self.preview_text_icon = ft.Text("🏷️", size=16)
+        self.preview_text_name = ft.Text("Предпросмотр тега", weight=ft.FontWeight.W_600, size=13)
+        self.preview_container = ft.Container(
+            padding=ft.Padding(left=12, top=6, right=12, bottom=6),
+            border_radius=8,
+            border=ft.Border.all(width=1, color="#4CAF50"),
+            content=ft.Row(
+                spacing=8,
+                tight=True,
+                controls=[
+                    self.preview_text_icon,
+                    self.preview_text_name,
+                ],
+            ),
+        )
+
+        FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextButton))
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Row(
+                controls=[
+                    ft.Icon(title_icon, color=ft.Colors.PRIMARY, size=26),
+                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=20),
+                ],
+                spacing=10,
+            ),
+            content=ft.Container(
+                width=480,
+                content=ft.Column(
+                    tight=True,
+                    spacing=14,
+                    controls=[
+                        self.name_field,
+                        ft.Row(
+                            spacing=12,
+                            controls=[
+                                self.icon_field,
+                                self.color_field,
+                            ],
+                        ),
+                        ft.Text("Быстрый выбор иконки:", size=12, color=ft.Colors.GREY_400),
+                        ft.Row(wrap=True, spacing=6, run_spacing=6, controls=icon_chips),
+                        ft.Text("Быстрый выбор цвета:", size=12, color=ft.Colors.GREY_400),
+                        ft.Row(wrap=True, spacing=8, run_spacing=8, controls=color_chips),
+                        ft.Divider(height=1),
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            controls=[
+                                ft.Text("Внешний вид тега:", size=12, color=ft.Colors.GREY_400),
+                                self.preview_container,
+                            ],
+                        ),
+                    ],
+                ),
+            ),
+            actions=[
+                ft.TextButton(
+                    "Отмена",
+                    on_click=lambda _: _close_dialog(self.page, self.dialog),
+                ),
+                FilledBtn(
+                    "Сохранить тег",
+                    icon=ft.Icons.CHECK_ROUNDED,
+                    on_click=lambda _: self._save_tag(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self._update_preview()
+
+    def _select_icon(self, icon: str) -> None:
+        self.icon_field.value = icon
+        self._update_preview()
+        self.page.update()
+
+    def _select_color(self, color: str) -> None:
+        self.color_field.value = color
+        self._update_preview()
+        self.page.update()
+
+    def _update_preview(self) -> None:
+        icon = (self.icon_field.value or "🏷️").strip() or "🏷️"
+        name = (self.name_field.value or "Название тега").strip() or "Название тега"
+        color = (self.color_field.value or "#4CAF50").strip() or "#4CAF50"
+
+        self.preview_container.border = ft.Border.all(width=1, color=color)
+        self.preview_text_icon.value = icon
+        self.preview_text_name.value = name
+
+    def _save_tag(self) -> None:
+        name = (self.name_field.value or "").strip()
+        icon = (self.icon_field.value or "🏷️").strip() or "🏷️"
+        color = (self.color_field.value or "#4CAF50").strip() or "#4CAF50"
+
+        if not name:
+            self.name_field.error_text = "Введите название тега"
+            self.page.update()
+            return
+
+        try:
+            if self.tag is None:
+                self.task_manager.add_subject(name=name, color=color, icon=icon)
+                msg = f"Тег «{name}» успешно создан!"
+            else:
+                self.task_manager.update_subject(self.tag.id, name=name, color=color, icon=icon)
+                msg = f"Тег «{name}» успешно обновлен!"
+
+            _close_dialog(self.page, self.dialog)
+            _show_snack(self.page, msg, bgcolor=ft.Colors.GREEN_800)
+
+            if self.on_success:
+                self.on_success()
+        except Exception as err:
+            self.name_field.error_text = f"Ошибка: {err}"
+            self.page.update()
+
+    def show(self) -> None:
+        _show_dialog(self.page, self.dialog)
+
+
+def open_tag_dialog(
+    page: ft.Page,
+    tag: Subject | None = None,
+    task_manager: TaskManager | None = None,
+    on_success: Callable[[], None] | None = None,
+) -> TagDialog:
+    dlg = TagDialog(page, tag=tag, task_manager=task_manager, on_success=on_success)
+    dlg.show()
+    return dlg
