@@ -99,14 +99,14 @@ class ScheduleScreen:
         self.tags_column = ft.ListView(spacing=8, expand=True)
         self.archive_column = ft.ListView(spacing=8, expand=True)
 
-        # Main content area with fast animated transition switcher (180ms fade) to hide page loads
+        # Main content area with fast animated transition switcher (150ms symmetric fade) to hide page loads without jitter
         self.content_area = ft.AnimatedSwitcher(
             content=ft.Container(expand=True),
             transition=ft.AnimatedSwitcherTransition.FADE,
-            duration=180,
-            reverse_duration=120,
+            duration=150,
+            reverse_duration=150,
             switch_in_curve=ft.AnimationCurve.EASE_OUT,
-            switch_out_curve=ft.AnimationCurve.EASE_IN,
+            switch_out_curve=ft.AnimationCurve.EASE_OUT,
             expand=True,
         )
         self.sidebar_area = ft.Container(
@@ -146,9 +146,10 @@ class ScheduleScreen:
         self.right_panel_container: ft.Container = self._build_right_panel_container()
         self.right_panel_barrier: ft.Container = self._build_right_panel_barrier()
 
-        # Stack wrapping content_area, backdrop barrier, and overlay right panel
+        # Stack wrapping content_area, backdrop barrier, and overlay right panel (fit=EXPAND prevents layout resize jitter)
         self.main_content_stack: ft.Stack = ft.Stack(
             expand=True,
+            fit=ft.StackFit.EXPAND,
             controls=[
                 self.content_area,
                 self.right_panel_barrier,
@@ -279,7 +280,7 @@ class ScheduleScreen:
             btn.border = (
                 ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.PRIMARY))
                 if is_active
-                else None
+                else ft.Border.all(1, ft.Colors.TRANSPARENT)
             )
 
     def _focus_control(self, control: ft.Control | None) -> None:
@@ -548,9 +549,9 @@ class ScheduleScreen:
                 else ft.Colors.TRANSPARENT
             )
             border_style = (
-                ft.Border.all(width=1, color=ft.Colors.PRIMARY)
+                ft.Border.all(width=1, color=ft.Colors.with_opacity(0.4, ft.Colors.PRIMARY))
                 if is_active
-                else None
+                else ft.Border.all(width=1, color=ft.Colors.TRANSPARENT)
             )
             text_color = ft.Colors.PRIMARY if is_active else ft.Colors.ON_SURFACE
             icon_color = ft.Colors.PRIMARY if is_active else ft.Colors.GREY_400
@@ -2477,9 +2478,7 @@ class ScheduleScreen:
             width=self.right_panel_width,
             visible=False,
             opacity=0.0,
-            offset=ft.Offset(0.08, 0),
-            animate_opacity=180,
-            animate_offset=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
+            animate_opacity=150,
             bgcolor=ft.Colors.with_opacity(0.70, "#161822"),
             blur=ft.Blur(20, 20, ft.BlurTileMode.CLAMP),
             border=ft.Border(
@@ -3115,7 +3114,6 @@ class ScheduleScreen:
         self.right_panel_barrier.visible = True
         self.right_panel_barrier.opacity = 1.0
         self.right_panel_container.visible = True
-        self.right_panel_container.offset = ft.Offset(0, 0)
         self.right_panel_container.opacity = 1.0
 
         if prev_id and prev_id in self._tag_card_containers:
@@ -3138,7 +3136,6 @@ class ScheduleScreen:
         self.right_panel_barrier.visible = True
         self.right_panel_barrier.opacity = 1.0
         self.right_panel_container.visible = True
-        self.right_panel_container.offset = ft.Offset(0, 0)
         self.right_panel_container.opacity = 1.0
 
         if prev_id and prev_id in self._task_card_containers:
@@ -3160,7 +3157,6 @@ class ScheduleScreen:
         self.right_panel_barrier.visible = False
         self.right_panel_barrier.opacity = 0.0
         self.right_panel_container.visible = False
-        self.right_panel_container.offset = ft.Offset(0.08, 0)
         self.right_panel_container.opacity = 0.0
         self.page.update()
 
@@ -3184,7 +3180,6 @@ class ScheduleScreen:
                     self.right_panel_barrier.visible = True
                     self.right_panel_barrier.opacity = 1.0
                     self.right_panel_container.visible = True
-                    self.right_panel_container.offset = ft.Offset(0, 0)
                     self.right_panel_container.opacity = 1.0
                     self._render_right_tag_panel_content(None)
                     self.page.update()
@@ -3207,7 +3202,6 @@ class ScheduleScreen:
                         self.right_panel_barrier.visible = True
                         self.right_panel_barrier.opacity = 1.0
                         self.right_panel_container.visible = True
-                        self.right_panel_container.offset = ft.Offset(0, 0)
                         self.right_panel_container.opacity = 1.0
                         self._render_right_panel_content(None)
                         self.page.update()
@@ -3223,15 +3217,21 @@ class ScheduleScreen:
             self._tab_versions[tab_idx] = self._tab_versions.get(tab_idx, 0) + 1
 
             if tab_idx == 0:
-                view = self._render_today_tasks_view()
+                inner = self._render_today_tasks_view()
             elif tab_idx == 1:
-                view = self._render_all_tasks_view()
+                inner = self._render_all_tasks_view()
             elif tab_idx == 2:
-                view = self._render_tags_view()
+                inner = self._render_tags_view()
             else:
-                view = self._render_archive_view()
+                inner = self._render_archive_view()
 
-            view.key = f"tab_view_{tab_idx}_v{self._tab_versions[tab_idx]}"
+            # Wrap in full-size top-left pinned container to ensure zero resize/centering jitter
+            view = ft.Container(
+                content=inner,
+                expand=True,
+                alignment=ft.Alignment(-1, -1),
+                key=f"tab_view_{tab_idx}_v{self._tab_versions[tab_idx]}",
+            )
             self._tab_views[tab_idx] = view
             self._dirty_tabs.discard(tab_idx)
 
