@@ -383,12 +383,6 @@ class ScheduleScreen:
                     ) if hasattr(ft, "ButtonStyle") else None,
                     on_click=lambda _: self.confirm_complete_all(),
                 ),
-                ft.IconButton(
-                    icon=ft.Icons.REFRESH_ROUNDED,
-                    tooltip="Обновить расписание",
-                    icon_color=ft.Colors.PRIMARY,
-                    on_click=lambda _: self.refresh(),
-                ),
             ],
         )
 
