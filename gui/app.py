@@ -93,7 +93,10 @@ class ScheduleScreen:
         self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.archive_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.content_area = ft.Container(expand=True)
-        self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
+        self.sidebar_area = ft.Container(
+            width=self.DEFAULT_EXPANDED_WIDTH,
+            on_click=lambda _: self.close_right_panel() if self.right_panel_open else None,
+        )
 
         # Quick-add task row state
         self._last_selected_subject_id: str | None = None
@@ -117,15 +120,20 @@ class ScheduleScreen:
         self.selected_tag_id: int | None = None
         self.right_panel_width: int = 400
         self.right_panel_container: ft.Container = self._build_right_panel_container()
+        self.right_panel_barrier: ft.Container = self._build_right_panel_barrier()
 
-        # Stack wrapping content_area and overlay right panel
+        # Stack wrapping content_area, backdrop barrier, and overlay right panel
         self.main_content_stack: ft.Stack = ft.Stack(
             expand=True,
             controls=[
                 self.content_area,
+                self.right_panel_barrier,
                 self.right_panel_container,
             ],
         )
+
+        # Setup keyboard shortcuts (e.g. Esc to close right panel)
+        self._setup_keyboard_shortcuts()
 
     # ──────────────────────────────────────────
     # Priority & Formatting Helpers
@@ -223,6 +231,8 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     def switch_tab(self, tab_index: int) -> None:
         """Switch active tab: 0 (Today), 1 (All Tasks), 2 (Tags), 3 (Archive)."""
+        if self.right_panel_open:
+            self.close_right_panel()
         if self.current_tab != tab_index:
             self.current_tab = tab_index
             self._render_sidebar()
@@ -2380,8 +2390,8 @@ class ScheduleScreen:
             bottom=0,
             width=self.right_panel_width,
             visible=False,
-            bgcolor=ft.Colors.with_opacity(0.88, "#181A20"),
-            blur=ft.Blur(16, 16, ft.BlurTileMode.CLAMP),
+            bgcolor=ft.Colors.with_opacity(0.70, "#161822"),
+            blur=ft.Blur(20, 20, ft.BlurTileMode.CLAMP),
             border=ft.Border(
                 left=ft.BorderSide(1.5, ft.Colors.with_opacity(0.35, ft.Colors.OUTLINE)),
             ),
@@ -2394,7 +2404,41 @@ class ScheduleScreen:
             border_radius=ft.BorderRadius(top_left=16, bottom_left=16, top_right=0, bottom_right=0),
             padding=ft.Padding(left=18, top=16, right=18, bottom=16),
             content=ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=14),
+            on_click=lambda _: None,  # Absorb clicks inside panel so they do not hit the barrier
         )
+
+    def _build_right_panel_barrier(self) -> ft.Container:
+        """Create the clickable semi-transparent backdrop barrier that closes the panel on click."""
+        return ft.Container(
+            left=0,
+            top=0,
+            right=0,
+            bottom=0,
+            visible=False,
+            bgcolor=ft.Colors.with_opacity(0.35, ft.Colors.BLACK),
+            blur=ft.Blur(4, 4, ft.BlurTileMode.CLAMP),
+            on_click=lambda _: self.close_right_panel(),
+        )
+
+    def _setup_keyboard_shortcuts(self) -> None:
+        """Register global keyboard shortcuts, e.g. Esc to dismiss overlay drawer."""
+        prev_handler = getattr(self.page, "on_keyboard_event", None)
+
+        def _on_keyboard(e: ft.KeyboardEvent) -> None:
+            if prev_handler and callable(prev_handler):
+                try:
+                    prev_handler(e)
+                except Exception:
+                    pass
+            # Dismiss right overlay panel on Escape key
+            if getattr(e, "key", "") in ("Escape", "Esc"):
+                dialog = getattr(self.page, "dialog", None)
+                if dialog and getattr(dialog, "open", False):
+                    return
+                if self.right_panel_open:
+                    self.close_right_panel()
+
+        self.page.on_keyboard_event = _on_keyboard
 
     def _render_right_panel_content(self, task: Task | None = None) -> None:
         """Populate the right overlay panel with editable description and properties."""
@@ -2975,6 +3019,7 @@ class ScheduleScreen:
         w = getattr(self.page, "width", 1000) or 1000
         self.right_panel_container.width = min(420, max(300, w - 60))
         self._render_right_tag_panel_content(tag)
+        self.right_panel_barrier.visible = True
         self.right_panel_container.visible = True
         self._render_content()
         self.page.update()
@@ -2988,6 +3033,7 @@ class ScheduleScreen:
         w = getattr(self.page, "width", 1000) or 1000
         self.right_panel_container.width = min(420, max(300, w - 60))
         self._render_right_panel_content(task)
+        self.right_panel_barrier.visible = True
         self.right_panel_container.visible = True
         self._render_content()
         self.page.update()
@@ -2997,6 +3043,7 @@ class ScheduleScreen:
         self.right_panel_open = False
         self.selected_task_id = None
         self.selected_tag_id = None
+        self.right_panel_barrier.visible = False
         self.right_panel_container.visible = False
         self._render_content()
         self.page.update()
@@ -3018,6 +3065,7 @@ class ScheduleScreen:
                 else:
                     self.right_panel_mode = "tag"
                     self.right_panel_open = True
+                    self.right_panel_barrier.visible = True
                     self.right_panel_container.visible = True
                     self._render_right_tag_panel_content(None)
                     self.page.update()
@@ -3037,6 +3085,7 @@ class ScheduleScreen:
                     else:
                         self.right_panel_mode = "task"
                         self.right_panel_open = True
+                        self.right_panel_barrier.visible = True
                         self.right_panel_container.visible = True
                         self._render_right_panel_content(None)
                         self.page.update()
@@ -3153,6 +3202,8 @@ class ScheduleScreen:
 
     def archive_task(self, task_id: int, task_name: str) -> None:
         """Move a completed task to the archive."""
+        if self.selected_task_id == task_id and self.right_panel_open:
+            self.close_right_panel()
         self.task_manager.archive_task(task_id)
         _show_snack(
             self.page,
@@ -3202,6 +3253,8 @@ class ScheduleScreen:
         """Show confirmation dialog before permanently deleting an archived task."""
         def _execute_delete(_):
             _close_dialog(self.page, delete_dialog)
+            if self.selected_task_id == task_id and self.right_panel_open:
+                self.close_right_panel()
             success = self.task_manager.delete_task(task_id)
             if success:
                 _show_snack(
@@ -3286,6 +3339,8 @@ class ScheduleScreen:
 
         def _execute_delete(_):
             _close_dialog(self.page, delete_dialog)
+            if self.selected_tag_id == tag.id and self.right_panel_open:
+                self.close_right_panel()
             success = self.task_manager.delete_subject(tag.id)
             if success:
                 _show_snack(
