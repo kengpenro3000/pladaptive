@@ -309,6 +309,14 @@ class ScheduleScreen:
 
         self.load_tasks()
 
+        # Floating Action Button to open the creation form
+        self.page.floating_action_button = ft.FloatingActionButton(
+            icon=ft.Icons.ADD,
+            tooltip="Добавить новую задачу",
+            bgcolor=ft.Colors.PRIMARY,
+            on_click=lambda _: self.open_add_dialog(),
+        )
+
         self.page.controls.clear()
         self.page.add(
             ft.Column(
@@ -327,6 +335,11 @@ class ScheduleScreen:
         """Reload tasks and update page."""
         self.load_tasks()
         self.page.update()
+
+    def open_add_dialog(self) -> None:
+        """Open the task creation dialog."""
+        from gui.forms import open_task_create_dialog
+        open_task_create_dialog(self.page, on_success=self.refresh)
 
 
 def main_view(page: ft.Page) -> None:
