@@ -111,7 +111,7 @@ class Task(Base):
     )
 
     # many-to-one → Subject
-    subject: Mapped[Subject] = relationship(back_populates="tasks")
+    subject: Mapped[Subject] = relationship(back_populates="tasks", lazy="joined")
 
     # one-to-many → History
     history_entries: Mapped[list[History]] = relationship(

@@ -1,4 +1,5 @@
 sqlalchemy>=2.0,<2.1
 flet>=0.25.0
+flet-desktop>=0.25.0
 pandas>=2.0
 scikit-learn>=1.3

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -114,6 +114,7 @@ class TaskScheduler:
         try:
             tasks: list[Task] = (
                 session.query(Task)
+                .options(joinedload(Task.subject))
                 .filter(Task.status.notin_([
                     TaskStatus.COMPLETED,
                     TaskStatus.CANCELLED,
