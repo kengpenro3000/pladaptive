@@ -298,6 +298,21 @@ class ScheduleScreen:
                             run_spacing=8,
                             controls=footer_controls,
                         ),
+                        ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                        # Action button: Завершить задачу
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.OutlinedButton(
+                                    "Завершить задачу",
+                                    icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                                    style=ft.ButtonStyle(
+                                        color=ft.Colors.GREEN_400,
+                                    ) if hasattr(ft, "ButtonStyle") else None,
+                                    on_click=lambda _, tid=task.id, tname=task.name, et=task.expected_time: self.open_complete_dialog(tid, tname, et),
+                                ),
+                            ],
+                        ),
                     ],
                 ),
             ),
@@ -422,6 +437,19 @@ class ScheduleScreen:
         """Open the task creation dialog."""
         from gui.forms import open_task_create_dialog
         open_task_create_dialog(self.page, on_success=self.refresh)
+
+    def open_complete_dialog(
+        self, task_id: int, task_name: str, expected_time: float | None = None
+    ) -> None:
+        """Open the complete task dialog."""
+        from gui.forms import open_task_complete_dialog
+        open_task_complete_dialog(
+            self.page,
+            task_id=task_id,
+            task_name=task_name,
+            expected_time_hours=expected_time,
+            on_success=self.refresh,
+        )
 
 
 def main_view(page: ft.Page) -> None:

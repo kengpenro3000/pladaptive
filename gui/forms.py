@@ -324,3 +324,143 @@ def open_task_create_dialog(
     form = TaskCreateDialog(page, task_manager=task_manager, on_success=on_success)
     form.show()
     return form
+
+
+class TaskCompleteDialog:
+    """Dialog asking for actual time spent before completing a task."""
+
+    def __init__(
+        self,
+        page: ft.Page,
+        task_id: int,
+        task_name: str,
+        expected_time_hours: float | None = None,
+        task_manager: TaskManager | None = None,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        self.page = page
+        self.task_id = task_id
+        self.task_name = task_name
+        self.task_manager = task_manager or TaskManager()
+        self.on_success = on_success
+
+        default_min = ""
+        if expected_time_hours is not None:
+            r = round(expected_time_hours * 60)
+            default_min = str(r)
+
+        self.time_field = ft.TextField(
+            label="Фактическое время (в минутах)*",
+            value=default_min,
+            hint_text="Например: 45",
+            autofocus=True,
+            input_filter=ft.NumbersOnlyInputFilter(),
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
+        FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextButton))
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, color=ft.Colors.GREEN_400, size=26),
+                    ft.Text("Завершение задачи", weight=ft.FontWeight.BOLD, size=18),
+                ],
+                spacing=10,
+            ),
+            content=ft.Container(
+                width=420,
+                content=ft.Column(
+                    tight=True,
+                    spacing=12,
+                    controls=[
+                        ft.Text(
+                            f"Задача: {self.task_name}",
+                            weight=ft.FontWeight.W_600,
+                            size=14,
+                            color=ft.Colors.PRIMARY,
+                        ),
+                        ft.Text(
+                            "Сколько минут вы фактически потратили на задачу?",
+                            size=14,
+                            color=ft.Colors.GREY_300,
+                        ),
+                        self.time_field,
+                    ],
+                ),
+            ),
+            actions=[
+                ft.TextButton(
+                    "Отмена",
+                    on_click=lambda _: _close_dialog(self.page, self.dialog),
+                ),
+                FilledBtn(
+                    "Подтвердить",
+                    icon=ft.Icons.CHECK_ROUNDED,
+                    on_click=lambda _: self._complete_task(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+    def _complete_task(self) -> None:
+        raw_val = (self.time_field.value or "").strip()
+        if not raw_val:
+            self.time_field.error_text = "Введите потраченное время"
+            self.page.update()
+            return
+
+        try:
+            minutes = float(raw_val)
+            if minutes <= 0:
+                self.time_field.error_text = "Время должно быть больше 0"
+                self.page.update()
+                return
+        except ValueError:
+            self.time_field.error_text = "Введите число"
+            self.page.update()
+            return
+
+        actual_hours = round(minutes / 60.0, 4)
+
+        try:
+            self.task_manager.complete_task(self.task_id, actual_time=actual_hours)
+            _close_dialog(self.page, self.dialog)
+
+            min_display = int(minutes) if minutes.is_integer() else minutes
+            _show_snack(
+                self.page,
+                f"Задача «{self.task_name}» завершена! Фактическое время ({min_display} мин) записано в историю.",
+                bgcolor=ft.Colors.GREEN_800,
+            )
+
+            if self.on_success:
+                self.on_success()
+        except Exception as err:
+            self.time_field.error_text = f"Ошибка: {err}"
+            self.page.update()
+
+    def show(self) -> None:
+        """Display the complete task dialog."""
+        _show_dialog(self.page, self.dialog)
+
+
+def open_task_complete_dialog(
+    page: ft.Page,
+    task_id: int,
+    task_name: str,
+    expected_time_hours: float | None = None,
+    task_manager: TaskManager | None = None,
+    on_success: Callable[[], None] | None = None,
+) -> TaskCompleteDialog:
+    """Helper function to instantiate and show the task completion dialog."""
+    form = TaskCompleteDialog(
+        page,
+        task_id=task_id,
+        task_name=task_name,
+        expected_time_hours=expected_time_hours,
+        task_manager=task_manager,
+        on_success=on_success,
+    )
+    form.show()
+    return form
