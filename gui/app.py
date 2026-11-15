@@ -1,9 +1,13 @@
 """Main GUI application screen with Navigation Sidebar and Tab Views.
 
 Features:
-- Sidebar with Tabs: 'Задачи' (Schedule/Tasks) and 'Теги / Предметы' (Tags Management).
-- Dynamic Tags System: Add, edit, delete tags with custom UTF-icon and color.
-- Tasks view: Dynamic colored tag badges, whole-card click to edit task,
+- Sidebar with Tabs:
+  0. 'Сегодняшние задачи' (Tasks scheduled for today or overdue).
+  1. 'Все задачи' (All active prioritized tasks).
+  2. 'Теги и предметы' (Tag and subject management).
+- Task planned date ('scheduled_date'): Tasks can be scheduled for any day,
+  with visual indicators for today, tomorrow, overdue, or unscheduled.
+- Tasks views: Dynamic colored tag badges, scheduled date badges, whole-card click to edit,
   'Завершить задачу' action, 'Завершить все задачи' header button, no reload button.
 - Tags view: Tag cards with UTF icon, color swatch, task count, edit and delete actions.
 """
@@ -11,7 +15,7 @@ Features:
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 # Ensure root is in sys.path
@@ -40,16 +44,25 @@ FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextBut
 class ScheduleScreen:
     """Renders and manages the main application view with sidebar and tabbed content."""
 
+    MONTHS_RU = [
+        "", "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    ]
+    WEEKDAYS_RU = [
+        "понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"
+    ]
+
     def __init__(self, page: ft.Page) -> None:
         self.page = page
         self.scheduler = TaskScheduler()
         self.task_manager = TaskManager()
 
-        # Active tab: 0 = Tasks, 1 = Tags
+        # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags
         self.current_tab = 0
 
         # Containers
-        self.tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
+        self.today_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
+        self.all_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.tags_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(width=260)
@@ -98,6 +111,26 @@ class ScheduleScreen:
             return f"{int(r)} мин"
         return f"{r:.1f} мин"
 
+    def _format_scheduled_date(
+        self, sched_date: date | None
+    ) -> tuple[str, str, int]:
+        """Return (formatted_text, color, icon) for scheduled date."""
+        if sched_date is None:
+            return "Не запланировано", ft.Colors.GREY_500, ft.Icons.EVENT_BUSY_ROUNDED
+
+        today = date.today()
+        diff = (sched_date - today).days
+        date_str = sched_date.strftime("%d.%m.%Y")
+
+        if diff < 0:
+            return f"{date_str} (просрочено на {-diff} дн.)", ft.Colors.RED_400, ft.Icons.EVENT_REPEAT_ROUNDED
+        elif diff == 0:
+            return f"{date_str} (Сегодня)", ft.Colors.CYAN_300, ft.Icons.TODAY_ROUNDED
+        elif diff == 1:
+            return f"{date_str} (Завтра)", ft.Colors.BLUE_300, ft.Icons.EVENT_NOTE_ROUNDED
+        else:
+            return date_str, ft.Colors.GREEN_400, ft.Icons.EVENT_ROUNDED
+
     def _format_deadline(
         self, deadline: datetime | None, days_left: int | None
     ) -> tuple[str, str]:
@@ -110,7 +143,7 @@ class ScheduleScreen:
             return date_str, ft.Colors.ON_SURFACE_VARIANT
 
         if days_left < 0:
-            return f"{date_str} (просрочено на {-days_left} дн.)", ft.Colors.RED_400
+            return f"{date_str} (дедлайн просрочен)", ft.Colors.RED_400
         elif days_left == 0:
             return f"{date_str} (сегодня!)", ft.Colors.DEEP_ORANGE_400
         elif days_left == 1:
@@ -118,11 +151,18 @@ class ScheduleScreen:
         else:
             return f"{date_str} (осталось {days_left} дн.)", ft.Colors.GREEN_400
 
+    def _format_today_header(self) -> str:
+        """Format today's date in Russian for the header."""
+        today = date.today()
+        m_name = self.MONTHS_RU[today.month] if 1 <= today.month <= 12 else ""
+        w_name = self.WEEKDAYS_RU[today.weekday()] if 0 <= today.weekday() < 7 else ""
+        return f"{today.day} {m_name} {today.year}, {w_name}"
+
     # ──────────────────────────────────────────
     # Tab Switching & Navigation
     # ──────────────────────────────────────────
     def switch_tab(self, tab_index: int) -> None:
-        """Switch active tab between 0 (Tasks) and 1 (Tags)."""
+        """Switch active tab: 0 (Today), 1 (All Tasks), 2 (Tags)."""
         if self.current_tab != tab_index:
             self.current_tab = tab_index
             self._render_sidebar()
@@ -132,7 +172,7 @@ class ScheduleScreen:
 
     def _update_fab(self) -> None:
         """Update floating action button based on active tab."""
-        if self.current_tab == 0:
+        if self.current_tab in (0, 1):
             self.page.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD,
                 tooltip="Добавить новую задачу",
@@ -152,7 +192,8 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     def _render_sidebar(self) -> None:
         """Render the sidebar with brand, nav items, and statistics."""
-        active_tasks = self.scheduler.get_prioritized_tasks()
+        today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
+        all_active_tasks = self.scheduler.get_prioritized_tasks(only_today=False)
         all_tags = self.task_manager.get_all_subjects()
         all_tasks = self.task_manager.get_all_tasks()
         completed_count = len([t for t in all_tasks if t.status == TaskStatus.COMPLETED])
@@ -257,8 +298,9 @@ class ScheduleScreen:
         nav_items = ft.Column(
             spacing=8,
             controls=[
-                _nav_button("Задачи", ft.Icons.TASK_ALT_ROUNDED, 0, str(len(active_tasks))),
-                _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 1, str(len(all_tags))),
+                _nav_button("Сегодняшние задачи", ft.Icons.TODAY_ROUNDED, 0, str(len(today_tasks))),
+                _nav_button("Все задачи", ft.Icons.CHECKLIST_ROUNDED, 1, str(len(all_active_tasks))),
+                _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(len(all_tags))),
             ],
         )
 
@@ -274,8 +316,15 @@ class ScheduleScreen:
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("Активных задач:", size=11, color=ft.Colors.GREY_400),
-                            ft.Text(str(len(active_tasks)), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
+                            ft.Text("На сегодня:", size=11, color=ft.Colors.GREY_400),
+                            ft.Text(str(len(today_tasks)), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
+                        ],
+                    ),
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        controls=[
+                            ft.Text("Всего активных:", size=11, color=ft.Colors.GREY_400),
+                            ft.Text(str(len(all_active_tasks)), size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_300),
                         ],
                     ),
                     ft.Row(
@@ -315,13 +364,13 @@ class ScheduleScreen:
         )
 
     # ──────────────────────────────────────────
-    # Tasks Tab & Cards
+    # Task Cards Builder
     # ──────────────────────────────────────────
     def build_task_card(self, scored: ScoredTask, rank: int) -> ft.Card:
         """Render a single prioritized task card.
-        
+
         Clicking anywhere on the card opens the edit dialog.
-        Displays dynamic tag icon and color badge.
+        Displays dynamic tag badge, planned date, deadline, time, and urgency.
         """
         task = scored.task
         subject = task.subject
@@ -333,6 +382,9 @@ class ScheduleScreen:
             task.priority
         )
         time_str = self._format_time(task.expected_time)
+        sched_str, sched_color, sched_icon = self._format_scheduled_date(
+            task.scheduled_date
+        )
         deadline_str, deadline_color = self._format_deadline(
             task.deadline, scored.days_left
         )
@@ -371,6 +423,27 @@ class ScheduleScreen:
             border_radius=8,
         )
 
+        # Scheduled date badge
+        sched_badge = ft.Container(
+            content=ft.Row(
+                spacing=5,
+                tight=True,
+                controls=[
+                    ft.Icon(sched_icon, size=14, color=sched_color),
+                    ft.Text(
+                        f"План: {sched_str}",
+                        size=12,
+                        weight=ft.FontWeight.W_600,
+                        color=sched_color,
+                    ),
+                ],
+            ),
+            bgcolor=ft.Colors.with_opacity(0.12, sched_color),
+            border=ft.Border.all(width=1, color=ft.Colors.with_opacity(0.35, sched_color)),
+            padding=ft.Padding(left=8, top=3, right=8, bottom=3),
+            border_radius=8,
+        )
+
         # Time chip
         time_chip = ft.Container(
             content=ft.Row(
@@ -383,7 +456,7 @@ class ScheduleScreen:
                         color=ft.Colors.CYAN_300,
                     ),
                     ft.Text(
-                        f"Ожидаемое время: {time_str}",
+                        f"Время: {time_str}",
                         size=12,
                         weight=ft.FontWeight.BOLD,
                         color=ft.Colors.CYAN_200,
@@ -399,7 +472,7 @@ class ScheduleScreen:
             ft.Row(
                 spacing=8,
                 wrap=True,
-                controls=[time_chip, tag_badge],
+                controls=[tag_badge, sched_badge, time_chip],
             )
         ]
 
@@ -432,28 +505,11 @@ class ScheduleScreen:
                 ],
                 spacing=4,
             ),
-            # Expected Time
-            ft.Row(
-                [
-                    ft.Icon(
-                        ft.Icons.ACCESS_TIME_ROUNDED,
-                        size=16,
-                        color=ft.Colors.CYAN_300,
-                    ),
-                    ft.Text(
-                        f"Время: {time_str}",
-                        size=12,
-                        weight=ft.FontWeight.W_600,
-                        color=ft.Colors.CYAN_100,
-                    ),
-                ],
-                spacing=4,
-            ),
             # Deadline
             ft.Row(
                 [
                     ft.Icon(
-                        ft.Icons.CALENDAR_TODAY_ROUNDED,
+                        ft.Icons.CALENDAR_MONTH_ROUNDED,
                         size=16,
                         color=deadline_color,
                     ),
@@ -528,7 +584,7 @@ class ScheduleScreen:
                             ),
                         ),
                         ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                        # Metadata footer row: Priority, Expected Time, Deadline, AI Prediction
+                        # Metadata footer row: Priority, Deadline, AI Prediction
                         ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             wrap=True,
@@ -556,14 +612,16 @@ class ScheduleScreen:
             ),
         )
 
-    def load_tasks(self) -> None:
-        """Fetch prioritized tasks and populate the tasks column."""
-        self.tasks_column.controls.clear()
-        scored_tasks = self.scheduler.get_prioritized_tasks()
+    # ──────────────────────────────────────────
+    # Tab 0: Today's Tasks
+    # ──────────────────────────────────────────
+    def load_today_tasks(self) -> None:
+        """Fetch prioritized tasks scheduled for today and populate column."""
+        self.today_tasks_column.controls.clear()
+        scored_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
 
         if not scored_tasks:
-            # Empty state
-            self.tasks_column.controls.append(
+            self.today_tasks_column.controls.append(
                 ft.Card(
                     elevation=1,
                     content=ft.Container(
@@ -574,20 +632,26 @@ class ScheduleScreen:
                             spacing=12,
                             controls=[
                                 ft.Icon(
-                                    ft.Icons.TASK_ALT_ROUNDED,
+                                    ft.Icons.EVENT_AVAILABLE_ROUNDED,
                                     size=48,
                                     color=ft.Colors.GREEN_400,
                                 ),
                                 ft.Text(
-                                    "Все задачи выполнены!",
+                                    "На сегодня нет запланированных задач!",
                                     size=18,
                                     weight=ft.FontWeight.BOLD,
                                 ),
                                 ft.Text(
-                                    "На сегодня нет активных или просроченных задач. Отличная работа!",
+                                    "Вы можете добавить новую задачу с датой выполнения на сегодня или выбрать задачу из вкладки «Все задачи».",
                                     size=14,
                                     color=ft.Colors.GREY_400,
                                     text_align=ft.TextAlign.CENTER,
+                                ),
+                                ft.Container(height=8),
+                                FilledBtn(
+                                    "Добавить задачу на сегодня",
+                                    icon=ft.Icons.ADD_TASK_ROUNDED,
+                                    on_click=lambda _: self.open_add_task_dialog(),
                                 ),
                             ],
                         ),
@@ -596,22 +660,22 @@ class ScheduleScreen:
             )
         else:
             for rank, scored in enumerate(scored_tasks, 1):
-                self.tasks_column.controls.append(self.build_task_card(scored, rank))
+                self.today_tasks_column.controls.append(self.build_task_card(scored, rank))
 
-    def _render_tasks_view(self) -> ft.Control:
-        """Build the full 'Задачи' screen view."""
-        self.load_tasks()
+    def _render_today_tasks_view(self) -> ft.Control:
+        """Build the 'Сегодняшние задачи' view."""
+        self.load_today_tasks()
 
         header_actions = ft.Row(
             spacing=10,
             controls=[
                 ft.OutlinedButton(
-                    "Завершить все задачи",
+                    "Завершить задачи дня",
                     icon=ft.Icons.DONE_ALL_ROUNDED,
                     style=ft.ButtonStyle(
                         color=ft.Colors.GREEN_400,
                     ) if hasattr(ft, "ButtonStyle") else None,
-                    on_click=lambda _: self.confirm_complete_all(),
+                    on_click=lambda _: self.confirm_complete_all(only_today=True),
                 ),
                 FilledBtn(
                     "Новая задача",
@@ -636,7 +700,7 @@ class ScheduleScreen:
                                     size=28,
                                 ),
                                 ft.Text(
-                                    "Расписание на сегодня",
+                                    "Сегодняшние задачи",
                                     size=22,
                                     weight=ft.FontWeight.BOLD,
                                 ),
@@ -644,7 +708,7 @@ class ScheduleScreen:
                             spacing=10,
                         ),
                         ft.Text(
-                            "Задачи автоматически отсортированы по адаптивной формуле срочности",
+                            f"{self._format_today_header()} • Задачи, запланированные на сегодня, отсортированные по срочности",
                             size=13,
                             color=ft.Colors.GREY_400,
                         ),
@@ -660,12 +724,122 @@ class ScheduleScreen:
             controls=[
                 header,
                 ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                self.tasks_column,
+                self.today_tasks_column,
             ],
         )
 
     # ──────────────────────────────────────────
-    # Tags / Subjects Tab & Cards
+    # Tab 1: All Tasks
+    # ──────────────────────────────────────────
+    def load_all_tasks(self) -> None:
+        """Fetch all incomplete tasks and populate column."""
+        self.all_tasks_column.controls.clear()
+        scored_tasks = self.scheduler.get_prioritized_tasks(only_today=False)
+
+        if not scored_tasks:
+            self.all_tasks_column.controls.append(
+                ft.Card(
+                    elevation=1,
+                    content=ft.Container(
+                        padding=40,
+                        alignment=ft.Alignment(0, 0),
+                        content=ft.Column(
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=12,
+                            controls=[
+                                ft.Icon(
+                                    ft.Icons.TASK_ALT_ROUNDED,
+                                    size=48,
+                                    color=ft.Colors.GREEN_400,
+                                ),
+                                ft.Text(
+                                    "Все задачи выполнены!",
+                                    size=18,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Text(
+                                    "Нет активных или просроченных задач. Отличная работа!",
+                                    size=14,
+                                    color=ft.Colors.GREY_400,
+                                    text_align=ft.TextAlign.CENTER,
+                                ),
+                            ],
+                        ),
+                    ),
+                )
+            )
+        else:
+            for rank, scored in enumerate(scored_tasks, 1):
+                self.all_tasks_column.controls.append(self.build_task_card(scored, rank))
+
+    def _render_all_tasks_view(self) -> ft.Control:
+        """Build the 'Все задачи' view."""
+        self.load_all_tasks()
+
+        header_actions = ft.Row(
+            spacing=10,
+            controls=[
+                ft.OutlinedButton(
+                    "Завершить все задачи",
+                    icon=ft.Icons.DONE_ALL_ROUNDED,
+                    style=ft.ButtonStyle(
+                        color=ft.Colors.GREEN_400,
+                    ) if hasattr(ft, "ButtonStyle") else None,
+                    on_click=lambda _: self.confirm_complete_all(only_today=False),
+                ),
+                FilledBtn(
+                    "Новая задача",
+                    icon=ft.Icons.ADD_ROUNDED,
+                    on_click=lambda _: self.open_add_task_dialog(),
+                ),
+            ],
+        )
+
+        header = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            wrap=True,
+            controls=[
+                ft.Column(
+                    spacing=4,
+                    controls=[
+                        ft.Row(
+                            [
+                                ft.Icon(
+                                    ft.Icons.CHECKLIST_ROUNDED,
+                                    color=ft.Colors.PRIMARY,
+                                    size=28,
+                                ),
+                                ft.Text(
+                                    "Все задачи",
+                                    size=22,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        ft.Text(
+                            "Полный список всех активных задач с планированием и дедлайнами",
+                            size=13,
+                            color=ft.Colors.GREY_400,
+                        ),
+                    ],
+                ),
+                header_actions,
+            ],
+        )
+
+        return ft.Column(
+            spacing=16,
+            expand=True,
+            controls=[
+                header,
+                ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                self.all_tasks_column,
+            ],
+        )
+
+    # ──────────────────────────────────────────
+    # Tab 2: Tags / Subjects
     # ──────────────────────────────────────────
     def build_tag_card(self, tag: Subject, task_count: int) -> ft.Card:
         """Render a single tag card with icon, color indicator, count, and actions."""
@@ -879,7 +1053,9 @@ class ScheduleScreen:
     def _render_content(self) -> None:
         """Render the main content view based on current tab."""
         if self.current_tab == 0:
-            self.content_area.content = self._render_tasks_view()
+            self.content_area.content = self._render_today_tasks_view()
+        elif self.current_tab == 1:
+            self.content_area.content = self._render_all_tasks_view()
         else:
             self.content_area.content = self._render_tags_view()
 
@@ -1000,20 +1176,23 @@ class ScheduleScreen:
         )
         _show_dialog(self.page, delete_dialog)
 
-    def confirm_complete_all(self) -> None:
-        """Show confirmation dialog to complete all active tasks."""
-        active_tasks = self.scheduler.get_prioritized_tasks()
+    def confirm_complete_all(self, only_today: bool = False) -> None:
+        """Show confirmation dialog to complete active tasks."""
+        active_tasks = self.scheduler.get_prioritized_tasks(only_today=only_today)
         count = len(active_tasks)
+        label = "сегодняшние задачи" if only_today else "все активные задачи"
         if count == 0:
-            _show_snack(self.page, "Нет активных задач для завершения.", bgcolor=ft.Colors.AMBER_800)
+            _show_snack(self.page, f"Нет активных задач ({label}) для завершения.", bgcolor=ft.Colors.AMBER_800)
             return
+
+        task_ids = [t.task.id for t in active_tasks]
 
         def _execute_complete_all(_):
             _close_dialog(self.page, confirm_dialog)
-            completed_count = self.task_manager.complete_all_active_tasks()
+            completed_count = self.task_manager.complete_all_active_tasks(task_ids=task_ids)
             _show_snack(
                 self.page,
-                f"Все задачи ({completed_count} шт.) успешно завершены и сохранены в историю!",
+                f"Задачи ({completed_count} шт.) успешно завершены и сохранены в историю!",
                 bgcolor=ft.Colors.GREEN_800,
             )
             self.refresh()
@@ -1022,12 +1201,12 @@ class ScheduleScreen:
             title=ft.Row(
                 controls=[
                     ft.Icon(ft.Icons.DONE_ALL_ROUNDED, color=ft.Colors.GREEN_400, size=26),
-                    ft.Text("Завершить все задачи?", weight=ft.FontWeight.BOLD, size=18),
+                    ft.Text("Завершить задачи?", weight=ft.FontWeight.BOLD, size=18),
                 ],
                 spacing=10,
             ),
             content=ft.Text(
-                f"Вы действительно хотите завершить все активные задачи ({count} шт.)?\n"
+                f"Вы действительно хотите завершить {label} ({count} шт.)?\n"
                 "Они будут переведены в статус 'Завершено' с записью в историю.",
                 size=14,
             ),
@@ -1037,7 +1216,7 @@ class ScheduleScreen:
                     on_click=lambda _: _close_dialog(self.page, confirm_dialog),
                 ),
                 FilledBtn(
-                    "Да, завершить все",
+                    "Да, завершить",
                     icon=ft.Icons.CHECK_ROUNDED,
                     on_click=_execute_complete_all,
                 ),

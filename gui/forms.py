@@ -8,7 +8,7 @@ via a SnackBar.
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -65,6 +65,19 @@ def _show_snack(page: ft.Page, text: str, bgcolor: str = ft.Colors.GREEN_800) ->
         page.snack_bar = snack
         snack.open = True
         page.update()
+
+
+def _parse_date(date_str: str) -> date | None:
+    """Parse date string into a date object."""
+    clean = date_str.strip()
+    if not clean:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(clean, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError("Используйте формат ГГГГ-ММ-ДД (например: 2026-11-15)")
 
 
 def _parse_deadline(date_str: str) -> datetime | None:
@@ -130,10 +143,41 @@ class TaskCreateDialog:
             ],
         )
 
+        today_str = date.today().strftime("%Y-%m-%d")
+        self.scheduled_date_field = ft.TextField(
+            label="Запланировано на день",
+            value=today_str,
+            hint_text="ГГГГ-ММ-ДД (например: 2026-11-15)",
+            icon=ft.Icons.EVENT_ROUNDED,
+        )
+
+        self.sched_date_picker = ft.DatePicker(
+            first_date=datetime(2020, 1, 1),
+            last_date=datetime(2035, 12, 31),
+            value=datetime.now(),
+            on_change=self._on_sched_date_picked,
+        )
+
+        self.scheduled_date_field.suffix = ft.IconButton(
+            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            tooltip="Выбрать день в календаре",
+            on_click=lambda _: self._open_sched_calendar(),
+        )
+
+        quick_sched_chips = ft.Row(
+            spacing=6,
+            controls=[
+                ft.TextButton("Сегодня", on_click=lambda _: self._set_sched_date(date.today())),
+                ft.TextButton("Завтра", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=1))),
+                ft.TextButton("Через 3 дня", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=3))),
+                ft.TextButton("Без даты", on_click=lambda _: self._set_sched_date(None)),
+            ],
+        )
+
         self.deadline_field = ft.TextField(
             label="Дедлайн (необязательно)",
             hint_text="ГГГГ-ММ-ДД (например: 2026-12-01)",
-            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            icon=ft.Icons.SCHEDULE_ROUNDED,
         )
 
         self.date_picker = ft.DatePicker(
@@ -163,12 +207,14 @@ class TaskCreateDialog:
                 width=480,
                 content=ft.Column(
                     tight=True,
-                    spacing=14,
+                    spacing=12,
                     controls=[
                         self.name_field,
                         self.subject_dropdown,
                         self.time_field,
                         self.priority_dropdown,
+                        self.scheduled_date_field,
+                        quick_sched_chips,
                         self.deadline_field,
                     ],
                 ),
@@ -186,6 +232,30 @@ class TaskCreateDialog:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
+
+    def _set_sched_date(self, d: date | None) -> None:
+        """Set scheduled date from quick action buttons."""
+        self.scheduled_date_field.value = d.strftime("%Y-%m-%d") if d else ""
+        self.scheduled_date_field.error_text = None
+        self.page.update()
+
+    def _open_sched_calendar(self) -> None:
+        """Open native DatePicker for scheduled date field."""
+        if hasattr(self.page, "show_dialog"):
+            self.page.show_dialog(self.sched_date_picker)
+        elif hasattr(self.page, "open"):
+            self.page.open(self.sched_date_picker)
+        else:
+            self.page.overlay.append(self.sched_date_picker)
+            self.sched_date_picker.open = True
+            self.page.update()
+
+    def _on_sched_date_picked(self, e: ft.ControlEvent) -> None:
+        """Handle scheduled date selection from DatePicker."""
+        if self.sched_date_picker.value:
+            self.scheduled_date_field.value = self.sched_date_picker.value.strftime("%Y-%m-%d")
+            self.scheduled_date_field.error_text = None
+            self.page.update()
 
     def _open_calendar(self) -> None:
         """Open native DatePicker for deadline field."""
@@ -205,7 +275,7 @@ class TaskCreateDialog:
             self.deadline_field.error_text = None
             self.page.update()
 
-    def _validate(self) -> tuple[bool, str, int | None, float | None, TaskPriority, datetime | None]:
+    def _validate(self) -> tuple[bool, str, int | None, float | None, TaskPriority, datetime | None, date | None]:
         """Validate input fields and return parsed values or error."""
         has_error = False
 
@@ -250,9 +320,21 @@ class TaskCreateDialog:
         except ValueError:
             priority = TaskPriority.MEDIUM
 
+        # Scheduled Date
+        sched_date: date | None = None
+        if self.scheduled_date_field.value and self.scheduled_date_field.value.strip():
+            try:
+                sched_date = _parse_date(self.scheduled_date_field.value)
+                self.scheduled_date_field.error_text = None
+            except ValueError as err:
+                self.scheduled_date_field.error_text = str(err)
+                has_error = True
+        else:
+            self.scheduled_date_field.error_text = None
+
         # Deadline
         deadline_dt: datetime | None = None
-        if self.deadline_field.value:
+        if self.deadline_field.value and self.deadline_field.value.strip():
             try:
                 deadline_dt = _parse_deadline(self.deadline_field.value)
                 self.deadline_field.error_text = None
@@ -264,14 +346,14 @@ class TaskCreateDialog:
 
         if has_error:
             self.page.update()
-            return False, name, None, None, priority, None
+            return False, name, None, None, priority, None, None
 
         subject_id = int(subject_id_raw)
-        return True, name, subject_id, expected_hours, priority, deadline_dt
+        return True, name, subject_id, expected_hours, priority, deadline_dt, sched_date
 
     def _save_task(self) -> None:
         """Validate, save task via TaskManager, display SnackBar, and close."""
-        valid, name, subject_id, expected_hours, priority, deadline_dt = self._validate()
+        valid, name, subject_id, expected_hours, priority, deadline_dt, sched_date = self._validate()
         if not valid or subject_id is None:
             return
 
@@ -282,6 +364,7 @@ class TaskCreateDialog:
                 priority=priority,
                 expected_time=expected_hours,
                 deadline=deadline_dt,
+                scheduled_date=sched_date,
             )
 
             # Close dialog first
@@ -385,12 +468,43 @@ class TaskEditDialog:
             ],
         )
 
+        initial_sched = task.scheduled_date.strftime("%Y-%m-%d") if getattr(task, "scheduled_date", None) else ""
+        self.scheduled_date_field = ft.TextField(
+            label="Запланировано на день",
+            value=initial_sched,
+            hint_text="ГГГГ-ММ-ДД (например: 2026-11-15)",
+            icon=ft.Icons.EVENT_ROUNDED,
+        )
+
+        self.sched_date_picker = ft.DatePicker(
+            first_date=datetime(2020, 1, 1),
+            last_date=datetime(2035, 12, 31),
+            value=datetime.combine(task.scheduled_date, datetime.min.time()) if getattr(task, "scheduled_date", None) else datetime.now(),
+            on_change=self._on_sched_date_picked,
+        )
+
+        self.scheduled_date_field.suffix = ft.IconButton(
+            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            tooltip="Выбрать день в календаре",
+            on_click=lambda _: self._open_sched_calendar(),
+        )
+
+        quick_sched_chips = ft.Row(
+            spacing=6,
+            controls=[
+                ft.TextButton("Сегодня", on_click=lambda _: self._set_sched_date(date.today())),
+                ft.TextButton("Завтра", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=1))),
+                ft.TextButton("Через 3 дня", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=3))),
+                ft.TextButton("Без даты", on_click=lambda _: self._set_sched_date(None)),
+            ],
+        )
+
         initial_deadline = task.deadline.strftime("%Y-%m-%d") if task.deadline else ""
         self.deadline_field = ft.TextField(
             label="Дедлайн (необязательно)",
             value=initial_deadline,
             hint_text="ГГГГ-ММ-ДД (например: 2026-12-01)",
-            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            icon=ft.Icons.SCHEDULE_ROUNDED,
         )
 
         self.date_picker = ft.DatePicker(
@@ -421,12 +535,14 @@ class TaskEditDialog:
                 width=480,
                 content=ft.Column(
                     tight=True,
-                    spacing=14,
+                    spacing=12,
                     controls=[
                         self.name_field,
                         self.subject_dropdown,
                         self.time_field,
                         self.priority_dropdown,
+                        self.scheduled_date_field,
+                        quick_sched_chips,
                         self.deadline_field,
                     ],
                 ),
@@ -444,6 +560,30 @@ class TaskEditDialog:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
+
+    def _set_sched_date(self, d: date | None) -> None:
+        """Set scheduled date from quick action buttons."""
+        self.scheduled_date_field.value = d.strftime("%Y-%m-%d") if d else ""
+        self.scheduled_date_field.error_text = None
+        self.page.update()
+
+    def _open_sched_calendar(self) -> None:
+        """Open native DatePicker for scheduled date field."""
+        if hasattr(self.page, "show_dialog"):
+            self.page.show_dialog(self.sched_date_picker)
+        elif hasattr(self.page, "open"):
+            self.page.open(self.sched_date_picker)
+        else:
+            self.page.overlay.append(self.sched_date_picker)
+            self.sched_date_picker.open = True
+            self.page.update()
+
+    def _on_sched_date_picked(self, e: ft.ControlEvent) -> None:
+        """Handle scheduled date selection from DatePicker."""
+        if self.sched_date_picker.value:
+            self.scheduled_date_field.value = self.sched_date_picker.value.strftime("%Y-%m-%d")
+            self.scheduled_date_field.error_text = None
+            self.page.update()
 
     def _open_calendar(self) -> None:
         """Open native DatePicker for deadline field."""
@@ -508,9 +648,21 @@ class TaskEditDialog:
         except ValueError:
             priority = TaskPriority.MEDIUM
 
+        # Scheduled Date
+        sched_date: date | None = None
+        if self.scheduled_date_field.value and self.scheduled_date_field.value.strip():
+            try:
+                sched_date = _parse_date(self.scheduled_date_field.value)
+                self.scheduled_date_field.error_text = None
+            except ValueError as err:
+                self.scheduled_date_field.error_text = str(err)
+                has_error = True
+        else:
+            self.scheduled_date_field.error_text = None
+
         # Deadline
         deadline_dt: datetime | None = None
-        if self.deadline_field.value:
+        if self.deadline_field.value and self.deadline_field.value.strip():
             try:
                 deadline_dt = _parse_deadline(self.deadline_field.value)
                 self.deadline_field.error_text = None
@@ -522,14 +674,14 @@ class TaskEditDialog:
 
         if has_error:
             self.page.update()
-            return False, name, None, None, priority, None
+            return False, name, None, None, priority, None, None
 
         subject_id = int(subject_id_raw)
-        return True, name, subject_id, expected_hours, priority, deadline_dt
+        return True, name, subject_id, expected_hours, priority, deadline_dt, sched_date
 
     def _save_task(self) -> None:
         """Validate, update task via TaskManager, display SnackBar, and close."""
-        valid, name, subject_id, expected_hours, priority, deadline_dt = self._validate()
+        valid, name, subject_id, expected_hours, priority, deadline_dt, sched_date = self._validate()
         if not valid or subject_id is None:
             return
 
@@ -541,6 +693,7 @@ class TaskEditDialog:
                 priority=priority,
                 expected_time=expected_hours,
                 deadline=deadline_dt,
+                scheduled_date=sched_date,
             )
 
             # Close dialog first

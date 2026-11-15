@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 from sqlalchemy.orm import Session, joinedload
@@ -105,22 +105,43 @@ class TaskScheduler:
 
     # ── public API ────────────────────────────
 
-    def get_prioritized_tasks(self) -> list[ScoredTask]:
-        """Return all incomplete tasks sorted by descending urgency score.
+    def get_prioritized_tasks(
+        self,
+        only_today: bool = False,
+        target_date: date | None = None,
+    ) -> list[ScoredTask]:
+        """Return incomplete tasks sorted by descending urgency score.
 
+        If *only_today* is True, filters to tasks scheduled for *target_date*
+        (defaults to date.today()) or past overdue dates, or tasks with deadline <= today.
         Uses a fresh session internally (context-managed).
         """
         session: Session = SessionLocal()
         try:
-            tasks: list[Task] = (
+            query = (
                 session.query(Task)
                 .options(joinedload(Task.subject))
                 .filter(Task.status.notin_([
                     TaskStatus.COMPLETED,
                     TaskStatus.CANCELLED,
                 ]))
-                .all()
             )
+
+            if only_today:
+                target = target_date or date.today()
+                end_of_day = datetime.combine(target, datetime.max.time())
+                query = query.filter(
+                    (
+                        (Task.scheduled_date == target)
+                        | (Task.scheduled_date < target)
+                        | (
+                            Task.scheduled_date.is_(None)
+                            & (Task.deadline <= end_of_day)
+                        )
+                    )
+                )
+
+            tasks: list[Task] = query.all()
 
             now = datetime.now()
             scored = [self._score_task(t, now) for t in tasks]

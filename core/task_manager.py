@@ -24,6 +24,9 @@ from database.models import (
 from ai.predictor import Prediction, TimePredictor
 
 
+_UNSET = object()
+
+
 class TaskManager:
     """Facade that wraps all database interactions behind typed methods."""
 
@@ -132,6 +135,7 @@ class TaskManager:
         priority: TaskPriority = TaskPriority.MEDIUM,
         expected_time: float | None = None,
         deadline: datetime | None = None,
+        scheduled_date: date | None = None,
     ) -> Task:
         """Create a new task linked to an existing subject.
 
@@ -159,6 +163,7 @@ class TaskManager:
                 priority=priority,
                 expected_time=expected_time,
                 deadline=deadline,
+                scheduled_date=scheduled_date,
                 status=TaskStatus.PENDING,
             )
             session.add(task)
@@ -229,6 +234,34 @@ class TaskManager:
                 _ = task.subject
             return task
 
+    def get_today_tasks(self, target_date: date | None = None) -> list[Task]:
+        """Return incomplete tasks scheduled for target_date (default today) or overdue."""
+        target = target_date or date.today()
+        with self._session() as session:
+            tasks = (
+                session.query(Task)
+                .filter(
+                    Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]),
+                    (
+                        (Task.scheduled_date == target)
+                        | (Task.scheduled_date < target)
+                        | (
+                            Task.scheduled_date.is_(None)
+                            & (Task.deadline <= datetime.combine(target, datetime.max.time()))
+                        )
+                    ),
+                )
+                .order_by(
+                    Task.deadline.is_(None),
+                    Task.deadline,
+                    Task.priority,
+                )
+                .all()
+            )
+            for t in tasks:
+                _ = t.subject
+            return tasks
+
     def update_task(
         self,
         task_id: int,
@@ -238,7 +271,8 @@ class TaskManager:
         description: str | None = None,
         priority: TaskPriority | None = None,
         expected_time: float | None = None,
-        deadline: datetime | None = None,
+        deadline: datetime | None | object = _UNSET,
+        scheduled_date: date | None | object = _UNSET,
     ) -> Task:
         """Update fields of an existing task and refresh AI prediction.
 
@@ -266,8 +300,10 @@ class TaskManager:
                 task.priority = priority
             if expected_time is not None:
                 task.expected_time = expected_time
-            if deadline is not None:
-                task.deadline = deadline
+            if deadline is not _UNSET:
+                task.deadline = deadline  # type: ignore[assignment]
+            if scheduled_date is not _UNSET:
+                task.scheduled_date = scheduled_date  # type: ignore[assignment]
 
             session.flush()
             _ = task.subject
@@ -358,8 +394,8 @@ class TaskManager:
             session.flush()
             return task
 
-    def complete_all_active_tasks(self) -> int:
-        """Mark all incomplete tasks as completed and record them into History.
+    def complete_all_active_tasks(self, task_ids: list[int] | None = None) -> int:
+        """Mark all (or specified) incomplete tasks as completed and record them into History.
 
         Uses each task's expected_time (or a default of 0.5 hours) as the
         actual_time recorded in history.
@@ -368,11 +404,12 @@ class TaskManager:
             The number of tasks completed.
         """
         with self._session() as session:
-            tasks = (
-                session.query(Task)
-                .filter(Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]))
-                .all()
+            query = session.query(Task).filter(
+                Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED])
             )
+            if task_ids is not None:
+                query = query.filter(Task.id.in_(task_ids))
+            tasks = query.all()
             count = 0
             today = date.today()
             for t in tasks:

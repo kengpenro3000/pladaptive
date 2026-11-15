@@ -57,4 +57,11 @@ def init_db() -> None:
             conn.exec_driver_sql("ALTER TABLE subjects ADD COLUMN color VARCHAR(32) NOT NULL DEFAULT '#4CAF50'")
         if "icon" not in cols:
             conn.exec_driver_sql("ALTER TABLE subjects ADD COLUMN icon VARCHAR(16) NOT NULL DEFAULT '🏷️'")
+
+        # Ensure scheduled_date column exists on tasks table
+        res_tasks = conn.exec_driver_sql("PRAGMA table_info(tasks)").fetchall()
+        cols_tasks = [r[1] for r in res_tasks]
+        if "scheduled_date" not in cols_tasks:
+            conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN scheduled_date DATE")
+
         conn.commit()

@@ -106,6 +106,12 @@ class Task(Base):
 
     deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    scheduled_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Date when the task is scheduled to be done",
+    )
+
     status: Mapped[TaskStatus] = mapped_column(
         Enum(TaskStatus, native_enum=False, length=20),
         default=TaskStatus.PENDING,
