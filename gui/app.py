@@ -31,6 +31,7 @@ from database.models import Subject, Task, TaskPriority, TaskStatus
 from ai.predictor import TimePredictor
 from gui.forms import (
     _close_dialog,
+    _parse_date,
     _show_dialog,
     _show_snack,
     open_task_complete_dialog,
@@ -72,11 +73,17 @@ class ScheduleScreen:
         self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
 
         # Containers
-        self.today_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
-        self.all_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
-        self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        self.today_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.all_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
+
+        # Quick-add row state
+        self._last_selected_subject_id: str | None = None
+        self._last_selected_priority: str = TaskPriority.MEDIUM.value
+        self._last_expected_minutes: str = "60"
+        self._quick_add_name_field: ft.TextField | None = None
 
         # Resizer handle between sidebar and content
         self.resizer_handle = self._build_resizer_handle()
@@ -184,6 +191,28 @@ class ScheduleScreen:
             self._update_fab()
             self.page.update()
 
+    def _focus_control(self, control: ft.Control | None) -> None:
+        """Safely focus a control supporting both synchronous and async Flet versions."""
+        if not control or not hasattr(control, "focus"):
+            return
+        try:
+            import inspect
+            if hasattr(self.page, "run_task") and inspect.iscoroutinefunction(control.focus):
+                self.page.run_task(control.focus)
+            else:
+                res = control.focus()
+                if inspect.iscoroutine(res):
+                    res.close()
+        except Exception:
+            pass
+
+    def _focus_or_open_add_task(self) -> None:
+        """Focus the inline quick-add input if present, or open creation dialog."""
+        if self._quick_add_name_field and hasattr(self._quick_add_name_field, "focus"):
+            self._focus_control(self._quick_add_name_field)
+            return
+        self.open_add_task_dialog()
+
     def _update_fab(self) -> None:
         """Update floating action button based on active tab."""
         if self.current_tab in (0, 1):
@@ -191,7 +220,7 @@ class ScheduleScreen:
                 icon=ft.Icons.ADD,
                 tooltip="Добавить новую задачу",
                 bgcolor=ft.Colors.PRIMARY,
-                on_click=lambda _: self.open_add_task_dialog(),
+                on_click=lambda _: self._focus_or_open_add_task(),
             )
         else:
             self.page.floating_action_button = ft.FloatingActionButton(
@@ -884,16 +913,16 @@ class ScheduleScreen:
                                     weight=ft.FontWeight.BOLD,
                                 ),
                                 ft.Text(
-                                    "Вы можете добавить новую задачу с датой выполнения на сегодня или выбрать задачу из вкладки «Все задачи».",
+                                    "Используйте строку выше для мгновенного добавления задачи на сегодня или откройте подробную форму.",
                                     size=14,
                                     color=ft.Colors.GREY_400,
                                     text_align=ft.TextAlign.CENTER,
                                 ),
                                 ft.Container(height=8),
                                 FilledBtn(
-                                    "Добавить задачу на сегодня",
+                                    "Добавить задачу",
                                     icon=ft.Icons.ADD_TASK_ROUNDED,
-                                    on_click=lambda _: self.open_add_task_dialog(),
+                                    on_click=lambda _: self._focus_or_open_add_task(),
                                 ),
                             ],
                         ),
@@ -931,6 +960,276 @@ class ScheduleScreen:
             for scored in completed_tasks:
                 self.today_tasks_column.controls.append(self.build_task_card(scored, 0))
 
+    def _build_quick_add_bar(self, only_today: bool = False) -> ft.Control:
+        """Build an inline, single-row quick-add bar for instant task creation."""
+        subjects = self.task_manager.get_all_subjects()
+        if not subjects:
+            try:
+                self.task_manager.add_subject("Общее", color="#2196F3", icon="📌")
+                subjects = self.task_manager.get_all_subjects()
+            except Exception:
+                pass
+
+        subject_options = [
+            ft.dropdown.Option(
+                key=str(s.id),
+                text=f"{getattr(s, 'icon', '🏷️')} {s.name}",
+            )
+            for s in subjects
+        ]
+
+        valid_subject_keys = [opt.key for opt in subject_options]
+        default_subject_key = None
+        if self._last_selected_subject_id and self._last_selected_subject_id in valid_subject_keys:
+            default_subject_key = self._last_selected_subject_id
+        elif subject_options:
+            default_subject_key = subject_options[0].key
+
+        today_str = date.today().strftime("%Y-%m-%d")
+        default_date_str = today_str if only_today else today_str
+
+        # Title / Name input field
+        name_field = ft.TextField(
+            hint_text="Добавить задачу... (нажмите Enter для сохранения)",
+            dense=True,
+            text_size=13,
+            expand=True,
+            autofocus=False,
+            on_submit=lambda _: _submit(),
+        )
+        self._quick_add_name_field = name_field
+
+        def _on_subject_change(e: ft.ControlEvent) -> None:
+            self._last_selected_subject_id = subject_dropdown.value
+
+        subject_dropdown = ft.Dropdown(
+            options=subject_options,
+            value=default_subject_key,
+            dense=True,
+            text_size=12,
+            width=135,
+            tooltip="Тег / Предмет",
+        )
+        if hasattr(subject_dropdown, "on_select"):
+            subject_dropdown.on_select = _on_subject_change
+        if hasattr(subject_dropdown, "on_change"):
+            subject_dropdown.on_change = _on_subject_change
+
+        time_field = ft.TextField(
+            value=self._last_expected_minutes or "60",
+            hint_text="60",
+            suffix=ft.Text("мин", size=11, color=ft.Colors.GREY_400),
+            input_filter=ft.NumbersOnlyInputFilter(),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            dense=True,
+            text_size=12,
+            width=80,
+            tooltip="Ожидаемое время в минутах",
+        )
+
+        def _on_priority_change(e: ft.ControlEvent) -> None:
+            self._last_selected_priority = priority_dropdown.value
+
+        priority_dropdown = ft.Dropdown(
+            options=[
+                ft.dropdown.Option(key=TaskPriority.LOW.value, text="🟢 Низкий"),
+                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="🟡 Средний"),
+                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="🟠 Высокий"),
+                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="🔴 Критич."),
+            ],
+            value=self._last_selected_priority or TaskPriority.MEDIUM.value,
+            dense=True,
+            text_size=12,
+            width=115,
+            tooltip="Приоритет задачи",
+        )
+        if hasattr(priority_dropdown, "on_select"):
+            priority_dropdown.on_select = _on_priority_change
+        if hasattr(priority_dropdown, "on_change"):
+            priority_dropdown.on_change = _on_priority_change
+
+        date_picker = ft.DatePicker(
+            first_date=datetime(2020, 1, 1),
+            last_date=datetime(2035, 12, 31),
+            value=datetime.now(),
+        )
+
+        def _on_date_picked(e: ft.ControlEvent) -> None:
+            if date_picker.value:
+                scheduled_date_field.value = date_picker.value.strftime("%Y-%m-%d")
+                scheduled_date_field.error_text = None
+                self.page.update()
+
+        date_picker.on_change = _on_date_picked
+
+        def _open_date_picker() -> None:
+            if hasattr(self.page, "show_dialog"):
+                self.page.show_dialog(date_picker)
+            elif hasattr(self.page, "open"):
+                self.page.open(date_picker)
+            else:
+                if date_picker not in self.page.overlay:
+                    self.page.overlay.append(date_picker)
+                date_picker.open = True
+                self.page.update()
+
+        scheduled_date_field = ft.TextField(
+            value=default_date_str,
+            hint_text="ГГГГ-ММ-ДД",
+            dense=True,
+            text_size=12,
+            width=115,
+            tooltip="Запланированная дата выполнения (ГГГГ-ММ-ДД)",
+            suffix=ft.IconButton(
+                icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+                icon_size=16,
+                tooltip="Выбрать дату в календаре",
+                on_click=lambda _: _open_date_picker(),
+            ),
+        )
+
+        def _submit(e: ft.ControlEvent | None = None) -> None:
+            title = (name_field.value or "").strip()
+            if not title:
+                name_field.error_text = "Введите название задачи"
+                self.page.update()
+                return
+
+            name_field.error_text = None
+
+            # Subject
+            subject_id_raw = subject_dropdown.value
+            if not subject_id_raw:
+                _show_snack(self.page, "Сначала выберите или создайте тег!", bgcolor=ft.Colors.AMBER_800)
+                return
+            subject_id = int(subject_id_raw)
+            self._last_selected_subject_id = str(subject_id)
+
+            # Time
+            time_raw = (time_field.value or "").strip()
+            expected_hours = 1.0
+            if time_raw:
+                try:
+                    mins = float(time_raw)
+                    if mins > 0:
+                        expected_hours = round(mins / 60.0, 4)
+                        self._last_expected_minutes = time_raw
+                except ValueError:
+                    pass
+
+            # Priority
+            try:
+                priority = TaskPriority(priority_dropdown.value or TaskPriority.MEDIUM.value)
+            except ValueError:
+                priority = TaskPriority.MEDIUM
+            self._last_selected_priority = priority.value
+
+            # Scheduled Date
+            sched_date: date | None = None
+            date_raw = (scheduled_date_field.value or "").strip()
+            if date_raw:
+                try:
+                    sched_date = _parse_date(date_raw)
+                except ValueError:
+                    sched_date = date.today() if only_today else None
+            elif only_today:
+                sched_date = date.today()
+
+            try:
+                task = self.task_manager.add_task(
+                    name=title,
+                    subject_id=subject_id,
+                    priority=priority,
+                    expected_time=expected_hours,
+                    scheduled_date=sched_date,
+                )
+
+                # AI time prediction info
+                ai_info = ""
+                try:
+                    pred = TimePredictor().predict_time(subject_id, expected_hours)
+                    if not pred.cold_start:
+                        pred_min = round(pred.predicted_time * 60, 1)
+                        ai_info = f" • ИИ прогноз: {int(pred_min) if pred_min.is_integer() else pred_min:.0f} мин"
+                except Exception:
+                    pass
+
+                date_info = f" на {sched_date.strftime('%d.%m')}" if sched_date else ""
+                _show_snack(self.page, f"Задача «{title}» добавлена{date_info}!{ai_info}")
+                self.refresh()
+                self._focus_control(self._quick_add_name_field)
+            except Exception as err:
+                _show_snack(self.page, f"Ошибка при добавлении задачи: {err}", bgcolor=ft.Colors.RED_800)
+
+        add_btn = FilledBtn(
+            "Добавить",
+            icon=ft.Icons.ADD_ROUNDED,
+            on_click=lambda _: _submit(),
+        )
+
+        tune_btn = ft.IconButton(
+            icon=ft.Icons.TUNE_ROUNDED,
+            icon_size=18,
+            tooltip="Подробная форма с дедлайном и описанием",
+            on_click=lambda _: self.open_add_task_dialog(),
+        )
+
+        add_icon = ft.Icon(ft.Icons.ADD_TASK_ROUNDED, color=ft.Colors.PRIMARY, size=20)
+
+        # Responsive layout: single row on desktop, 2-line wrapped on narrow screens
+        page_width = getattr(self.page, "width", None) or 1000
+        if page_width >= 850:
+            content_controls = [
+                add_icon,
+                name_field,
+                subject_dropdown,
+                time_field,
+                priority_dropdown,
+                scheduled_date_field,
+                add_btn,
+                tune_btn,
+            ]
+            row_layout = ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=content_controls,
+            )
+        else:
+            row_layout = ft.Column(
+                spacing=6,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[add_icon, name_field, add_btn],
+                    ),
+                    ft.Row(
+                        spacing=8,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            subject_dropdown,
+                            time_field,
+                            priority_dropdown,
+                            scheduled_date_field,
+                            tune_btn,
+                        ],
+                    ),
+                ],
+            )
+
+        return ft.Card(
+            elevation=1,
+            content=ft.Container(
+                padding=ft.Padding(left=12, top=6, right=10, bottom=6),
+                border_radius=10,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.18, ft.Colors.OUTLINE)),
+                content=row_layout,
+            ),
+        )
+
     def _render_today_tasks_view(self) -> ft.Control:
         """Build the 'Сегодняшние задачи' view."""
         self.load_today_tasks()
@@ -951,9 +1250,10 @@ class ScheduleScreen:
                     ) if hasattr(ft, "ButtonStyle") else None,
                     on_click=lambda _: self.confirm_complete_all(only_today=True),
                 ),
-                FilledBtn(
-                    "Новая задача",
-                    icon=ft.Icons.ADD_ROUNDED,
+                ft.OutlinedButton(
+                    "Подробная форма",
+                    icon=ft.Icons.POST_ADD_ROUNDED,
+                    tooltip="Открыть расширенную форму (с дедлайном и описанием)",
                     on_click=lambda _: self.open_add_task_dialog(),
                 ),
             ],
@@ -993,12 +1293,15 @@ class ScheduleScreen:
             ],
         )
 
+        quick_add_bar = self._build_quick_add_bar(only_today=True)
+
         return ft.Column(
-            spacing=16,
+            spacing=12,
             expand=True,
             controls=[
                 header,
                 ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                quick_add_bar,
                 self.today_tasks_column,
             ],
         )
@@ -1036,10 +1339,16 @@ class ScheduleScreen:
                                     weight=ft.FontWeight.BOLD,
                                 ),
                                 ft.Text(
-                                    "Нет активных или просроченных задач. Отличная работа!",
+                                    "Нет активных или просроченных задач. Отличная работа! Для создания новой задачи используйте строку выше.",
                                     size=14,
                                     color=ft.Colors.GREY_400,
                                     text_align=ft.TextAlign.CENTER,
+                                ),
+                                ft.Container(height=8),
+                                FilledBtn(
+                                    "Добавить задачу",
+                                    icon=ft.Icons.ADD_TASK_ROUNDED,
+                                    on_click=lambda _: self._focus_or_open_add_task(),
                                 ),
                             ],
                         ),
@@ -1097,9 +1406,10 @@ class ScheduleScreen:
                     ) if hasattr(ft, "ButtonStyle") else None,
                     on_click=lambda _: self.confirm_complete_all(only_today=False),
                 ),
-                FilledBtn(
-                    "Новая задача",
-                    icon=ft.Icons.ADD_ROUNDED,
+                ft.OutlinedButton(
+                    "Подробная форма",
+                    icon=ft.Icons.POST_ADD_ROUNDED,
+                    tooltip="Открыть расширенную форму (с дедлайном и описанием)",
                     on_click=lambda _: self.open_add_task_dialog(),
                 ),
             ],
@@ -1139,12 +1449,15 @@ class ScheduleScreen:
             ],
         )
 
+        quick_add_bar = self._build_quick_add_bar(only_today=False)
+
         return ft.Column(
-            spacing=16,
+            spacing=12,
             expand=True,
             controls=[
                 header,
                 ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                quick_add_bar,
                 self.all_tasks_column,
             ],
         )
