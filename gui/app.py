@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import flet as ft
 
 from core.scheduler import ScoredTask, TaskScheduler
+from core.task_manager import TaskManager
 from database.models import TaskPriority
 from ai.predictor import TimePredictor
 
@@ -26,6 +27,7 @@ class ScheduleScreen:
     def __init__(self, page: ft.Page) -> None:
         self.page = page
         self.scheduler = TaskScheduler()
+        self.task_manager = TaskManager()
         self.tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
 
     def _get_priority_details(
@@ -258,6 +260,9 @@ class ScheduleScreen:
             content=ft.Container(
                 padding=14,
                 border_radius=12,
+                ink=True,
+                tooltip="Нажмите на карточку, чтобы изменить задачу",
+                on_click=lambda _, t=task: self.open_edit_dialog(t),
                 content=ft.Column(
                     spacing=12,
                     controls=[
@@ -299,19 +304,10 @@ class ScheduleScreen:
                             controls=footer_controls,
                         ),
                         ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                        # Action buttons: Редактировать & Завершить задачу
+                        # Action button: Завершить задачу
                         ft.Row(
                             alignment=ft.MainAxisAlignment.END,
-                            spacing=10,
                             controls=[
-                                ft.OutlinedButton(
-                                    "Редактировать",
-                                    icon=ft.Icons.EDIT_ROUNDED,
-                                    style=ft.ButtonStyle(
-                                        color=ft.Colors.LIGHT_BLUE_300,
-                                    ) if hasattr(ft, "ButtonStyle") else None,
-                                    on_click=lambda _, t=task: self.open_edit_dialog(t),
-                                ),
                                 ft.OutlinedButton(
                                     "Завершить задачу",
                                     icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
@@ -376,8 +372,29 @@ class ScheduleScreen:
         self.page.padding = 20
 
         # Header bar
+        header_actions = ft.Row(
+            spacing=8,
+            controls=[
+                ft.OutlinedButton(
+                    "Завершить все задачи",
+                    icon=ft.Icons.DONE_ALL_ROUNDED,
+                    style=ft.ButtonStyle(
+                        color=ft.Colors.GREEN_400,
+                    ) if hasattr(ft, "ButtonStyle") else None,
+                    on_click=lambda _: self.confirm_complete_all(),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.REFRESH_ROUNDED,
+                    tooltip="Обновить расписание",
+                    icon_color=ft.Colors.PRIMARY,
+                    on_click=lambda _: self.refresh(),
+                ),
+            ],
+        )
+
         header = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            wrap=True,
             controls=[
                 ft.Column(
                     spacing=4,
@@ -404,12 +421,7 @@ class ScheduleScreen:
                         ),
                     ],
                 ),
-                ft.IconButton(
-                    icon=ft.Icons.REFRESH_ROUNDED,
-                    tooltip="Обновить расписание",
-                    icon_color=ft.Colors.PRIMARY,
-                    on_click=lambda _: self.refresh(),
-                ),
+                header_actions,
             ],
         )
 
@@ -464,6 +476,57 @@ class ScheduleScreen:
             expected_time_hours=expected_time,
             on_success=self.refresh,
         )
+
+    def confirm_complete_all(self) -> None:
+        """Show confirmation dialog to complete all active tasks."""
+        active_tasks = self.scheduler.get_prioritized_tasks()
+        count = len(active_tasks)
+        if count == 0:
+            from gui.forms import _show_snack
+            _show_snack(self.page, "Нет активных задач для завершения.", bgcolor=ft.Colors.AMBER_800)
+            return
+
+        FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextButton))
+
+        def _execute_complete_all(_):
+            from gui.forms import _close_dialog, _show_snack
+            _close_dialog(self.page, confirm_dialog)
+            completed_count = self.task_manager.complete_all_active_tasks()
+            _show_snack(
+                self.page,
+                f"Все задачи ({completed_count} шт.) успешно завершены и сохранены в историю!",
+                bgcolor=ft.Colors.GREEN_800,
+            )
+            self.refresh()
+
+        from gui.forms import _show_dialog, _close_dialog
+        confirm_dialog = ft.AlertDialog(
+            title=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.DONE_ALL_ROUNDED, color=ft.Colors.GREEN_400, size=26),
+                    ft.Text("Завершить все задачи?", weight=ft.FontWeight.BOLD, size=18),
+                ],
+                spacing=10,
+            ),
+            content=ft.Text(
+                f"Вы действительно хотите завершить все активные задачи ({count} шт.)?\n"
+                "Они будут переведены в статус 'Завершено' с записью в историю.",
+                size=14,
+            ),
+            actions=[
+                ft.TextButton(
+                    "Отмена",
+                    on_click=lambda _: _close_dialog(self.page, confirm_dialog),
+                ),
+                FilledBtn(
+                    "Да, завершить все",
+                    icon=ft.Icons.CHECK_ROUNDED,
+                    on_click=_execute_complete_all,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        _show_dialog(self.page, confirm_dialog)
 
 
 def main_view(page: ft.Page) -> None:

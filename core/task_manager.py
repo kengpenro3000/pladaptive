@@ -309,6 +309,36 @@ class TaskManager:
             session.flush()
             return task
 
+    def complete_all_active_tasks(self) -> int:
+        """Mark all incomplete tasks as completed and record them into History.
+
+        Uses each task's expected_time (or a default of 0.5 hours) as the
+        actual_time recorded in history.
+
+        Returns:
+            The number of tasks completed.
+        """
+        with self._session() as session:
+            tasks = (
+                session.query(Task)
+                .filter(Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]))
+                .all()
+            )
+            count = 0
+            today = date.today()
+            for t in tasks:
+                t.status = TaskStatus.COMPLETED
+                act_time = t.expected_time if t.expected_time is not None else 0.5
+                hist = History(
+                    task_id=t.id,
+                    actual_time=act_time,
+                    completed_at=today,
+                )
+                session.add(hist)
+                count += 1
+            session.flush()
+            return count
+
     # ──────────────────────────────────────────
     # History read
     # ──────────────────────────────────────────
