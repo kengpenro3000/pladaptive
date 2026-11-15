@@ -65,11 +65,11 @@ class Subject(Base):
     color: Mapped[str] = mapped_column(String(32), default="#4CAF50", server_default="#4CAF50", nullable=False)
     icon: Mapped[str] = mapped_column(String(16), default="🏷️", server_default="🏷️", nullable=False)
 
-    # one-to-many → Task
+    # one-to-many → Task (lazy="select" prevents eager loading of all tasks when querying subjects)
     tasks: Mapped[list[Task]] = relationship(
         back_populates="subject",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
 
     def __repr__(self) -> str:
@@ -136,11 +136,11 @@ class Task(Base):
     # many-to-one → Subject
     subject: Mapped[Subject] = relationship(back_populates="tasks", lazy="joined")
 
-    # one-to-many → History
+    # one-to-many → History (lazy="select" avoids loading history on normal task queries)
     history_entries: Mapped[list[History]] = relationship(
         back_populates="task",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="select",
     )
 
     def __repr__(self) -> str:

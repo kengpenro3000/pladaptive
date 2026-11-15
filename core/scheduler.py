@@ -55,7 +55,7 @@ DEADLINE_MAX_SCORE: float = 10.0   # score when overdue or due today
 # ──────────────────────────────────────────────
 # Result container
 # ──────────────────────────────────────────────
-@dataclass
+@dataclass(slots=True)
 class ScoredTask:
     """A task annotated with its computed urgency score."""
 

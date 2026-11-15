@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 # ---------- paths ----------
@@ -14,9 +14,22 @@ DATABASE_URL = f"sqlite:///{_BASE_DIR / 'planner.db'}"
 engine = create_engine(
     DATABASE_URL,
     echo=False,
+    pool_size=1,
+    max_overflow=2,
+    pool_recycle=120,
     # SQLite requires this so that foreign-key constraints are enforced.
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    """Tune SQLite pragmas to minimize memory footprint and optimize caching."""
+    cursor = dbapi_connection.cursor()
+    # Limit SQLite page cache size to 2 MB (~500 pages of 4096 bytes)
+    cursor.execute("PRAGMA cache_size = -2000")
+    cursor.execute("PRAGMA temp_store = MEMORY")
+    cursor.close()
 
 # ---------- session factory ----------
 SessionLocal = sessionmaker(

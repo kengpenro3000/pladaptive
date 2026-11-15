@@ -16,6 +16,7 @@ Features:
 
 from __future__ import annotations
 
+import gc
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -80,6 +81,11 @@ class ScheduleScreen:
         self.page = page
         self.scheduler = TaskScheduler()
         self.task_manager = TaskManager()
+        self.predictor = TimePredictor()
+
+        # Batch pagination limits to avoid bloated control trees in memory
+        self.all_tasks_limit = 40
+        self.archive_tasks_limit = 40
 
         # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags, 3 = Archive
         self.current_tab = 0
@@ -239,6 +245,7 @@ class ScheduleScreen:
             self._render_content()
             self._update_fab()
             self.page.update()
+            gc.collect(1)
 
     def _focus_control(self, control: ft.Control | None) -> None:
         """Safely focus a control supporting both synchronous and async Flet versions."""
@@ -484,18 +491,13 @@ class ScheduleScreen:
 
     def _render_sidebar(self) -> None:
         """Render the sidebar with navigation items and statistics."""
-        today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
-        today_active = len([s for s in today_tasks if s.task.status != TaskStatus.COMPLETED])
-        today_completed = len([s for s in today_tasks if s.task.status == TaskStatus.COMPLETED])
-
-        all_tasks_scored = self.scheduler.get_prioritized_tasks(only_today=False)
-        all_active = len([s for s in all_tasks_scored if s.task.status != TaskStatus.COMPLETED])
-
-        all_tags = self.task_manager.get_all_subjects()
-        all_tasks = self.task_manager.get_all_tasks()
-        completed_total_count = len([t for t in all_tasks if t.status == TaskStatus.COMPLETED])
-        archived_tasks = self.task_manager.get_archived_tasks()
-        archived_count = len(archived_tasks)
+        stats = self.task_manager.get_sidebar_stats()
+        today_active = stats["today_active"]
+        today_completed = stats["today_completed"]
+        all_active = stats["all_active"]
+        tags_count = stats["tags_count"]
+        completed_total_count = stats["completed_total"]
+        archived_count = stats["archived_count"]
 
         # Active indicator styling
         def _nav_button(
@@ -578,7 +580,7 @@ class ScheduleScreen:
             controls=[
                 _nav_button("Сегодняшние задачи", ft.Icons.TODAY_ROUNDED, 0, str(today_active)),
                 _nav_button("Все задачи", ft.Icons.CHECKLIST_ROUNDED, 1, str(all_active)),
-                _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(len(all_tags))),
+                _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(tags_count)),
                 _nav_button("Архив", ft.Icons.INVENTORY_2_ROUNDED, 3, str(archived_count) if archived_count > 0 else None),
             ],
         )
@@ -689,7 +691,7 @@ class ScheduleScreen:
         ai_pred_str = None
         if task.expected_time is not None:
             try:
-                pred = TimePredictor().predict_time(task.subject_id, task.expected_time)
+                pred = self.predictor.predict_time(task.subject_id, task.expected_time)
                 if not pred.cold_start:
                     pred_min = round(pred.predicted_time * 60, 1)
                     if pred_min.is_integer():
@@ -986,7 +988,7 @@ class ScheduleScreen:
             ),
         )
 
-    def load_today_tasks(self) -> None:
+    def load_today_tasks(self) -> tuple[int, int]:
         """Fetch prioritized tasks scheduled for today (including completed today) and populate column."""
         self.today_tasks_column.controls.clear()
         scored_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
@@ -1026,7 +1028,7 @@ class ScheduleScreen:
                     ),
                 )
             )
-            return
+            return 0, 0
 
         # 1. Add active uncompleted tasks
         if active_tasks:
@@ -1056,6 +1058,8 @@ class ScheduleScreen:
             self.today_tasks_column.controls.append(self._build_completed_divider(len(completed_tasks)))
             for scored in completed_tasks:
                 self.today_tasks_column.controls.append(self.build_task_card(scored, 0))
+
+        return len(active_tasks), len(completed_tasks)
 
     def _build_quick_add_bar(self, only_today: bool = False) -> ft.Control:
         """Build an inline, icon-only quick-add bar with hover tooltips for compact screens."""
@@ -1437,7 +1441,7 @@ class ScheduleScreen:
                 # AI time prediction info
                 ai_info = ""
                 try:
-                    pred = TimePredictor().predict_time(subject_id, expected_hours)
+                    pred = self.predictor.predict_time(subject_id, expected_hours)
                     if not pred.cold_start:
                         pred_min = round(pred.predicted_time * 60, 1)
                         ai_info = f" • ИИ прогноз: {int(pred_min) if pred_min.is_integer() else pred_min:.0f} мин"
@@ -1477,11 +1481,7 @@ class ScheduleScreen:
 
     def _render_today_tasks_view(self) -> ft.Control:
         """Build the 'Сегодняшние задачи' view."""
-        self.load_today_tasks()
-
-        today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
-        today_active = len([s for s in today_tasks if s.task.status != TaskStatus.COMPLETED])
-        today_done = len([s for s in today_tasks if s.task.status == TaskStatus.COMPLETED])
+        today_active, today_done = self.load_today_tasks()
 
         header_actions = ft.Row(
             spacing=6,
@@ -1554,8 +1554,8 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     # Tab 1: All Tasks
     # ──────────────────────────────────────────
-    def load_all_tasks(self) -> None:
-        """Fetch all tasks (including completed today) and populate column."""
+    def load_all_tasks(self) -> tuple[int, int]:
+        """Fetch all tasks (including completed today) and populate column with batched rendering."""
         self.all_tasks_column.controls.clear()
         scored_tasks = self.scheduler.get_prioritized_tasks(only_today=False)
 
@@ -1594,12 +1594,32 @@ class ScheduleScreen:
                     ),
                 )
             )
-            return
+            return 0, 0
 
-        # 1. Add active uncompleted tasks
+        # 1. Add active uncompleted tasks (batched to reduce Flet control tree RAM)
         if active_tasks:
-            for rank, scored in enumerate(active_tasks, 1):
+            display_active = active_tasks[:self.all_tasks_limit]
+            for rank, scored in enumerate(display_active, 1):
                 self.all_tasks_column.controls.append(self.build_task_card(scored, rank))
+
+            if len(active_tasks) > self.all_tasks_limit:
+                rem = len(active_tasks) - self.all_tasks_limit
+                def _show_more_all(_):
+                    self.all_tasks_limit += 40
+                    self.load_all_tasks()
+                    self.page.update()
+
+                self.all_tasks_column.controls.append(
+                    ft.Container(
+                        alignment=ft.Alignment(0, 0),
+                        padding=ft.Padding(0, 8, 0, 8),
+                        content=ft.OutlinedButton(
+                            f"Показать еще ({rem} активных задач)...",
+                            icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                            on_click=_show_more_all,
+                        ),
+                    )
+                )
         elif completed_tasks:
             self.all_tasks_column.controls.append(
                 ft.Card(
@@ -1625,13 +1645,11 @@ class ScheduleScreen:
             for scored in completed_tasks:
                 self.all_tasks_column.controls.append(self.build_task_card(scored, 0))
 
+        return len(active_tasks), len(completed_tasks)
+
     def _render_all_tasks_view(self) -> ft.Control:
         """Build the 'Все задачи' view."""
-        self.load_all_tasks()
-
-        all_tasks_scored = self.scheduler.get_prioritized_tasks(only_today=False)
-        all_active = len([s for s in all_tasks_scored if s.task.status != TaskStatus.COMPLETED])
-        all_done_today = len([s for s in all_tasks_scored if s.task.status == TaskStatus.COMPLETED])
+        all_active, all_done_today = self.load_all_tasks()
 
         header_actions = ft.Row(
             spacing=6,
@@ -1820,12 +1838,7 @@ class ScheduleScreen:
         """Fetch all tags/subjects and populate the tags column."""
         self.tags_column.controls.clear()
         tags = self.task_manager.get_all_subjects()
-        all_tasks = self.task_manager.get_all_tasks()
-
-        # Count tasks per tag
-        task_counts: dict[int, int] = {}
-        for t in all_tasks:
-            task_counts[t.subject_id] = task_counts.get(t.subject_id, 0) + 1
+        task_counts = self.task_manager.get_task_counts_by_subject()
 
         if not tags:
             self.tags_column.controls.append(
@@ -2268,8 +2281,8 @@ class ScheduleScreen:
             ),
         )
 
-    def load_archived_tasks(self) -> None:
-        """Fetch all archived tasks and populate the archive column."""
+    def load_archived_tasks(self) -> int:
+        """Fetch all archived tasks and populate the archive column with batched rendering."""
         self.archive_column.controls.clear()
         archived = self.task_manager.get_archived_tasks()
 
@@ -2305,18 +2318,40 @@ class ScheduleScreen:
                     ),
                 )
             )
-            return
+            return 0
 
-        for task in archived:
+        total_archived = len(archived)
+        display_archived = archived[:self.archive_tasks_limit]
+        for task in display_archived:
             self.archive_column.controls.append(self.build_archived_task_card(task))
+
+        if total_archived > self.archive_tasks_limit:
+            rem = total_archived - self.archive_tasks_limit
+            def _show_more_archived(_):
+                self.archive_tasks_limit += 40
+                self.load_archived_tasks()
+                self.page.update()
+
+            self.archive_column.controls.append(
+                ft.Container(
+                    alignment=ft.Alignment(0, 0),
+                    padding=ft.Padding(0, 8, 0, 8),
+                    content=ft.OutlinedButton(
+                        f"Показать еще ({rem} задач в архиве)...",
+                        icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                        on_click=_show_more_archived,
+                    ),
+                )
+            )
+
+        return total_archived
 
     def _render_archive_view(self) -> ft.Control:
         """Build the 'Архив задач' view."""
-        self.load_archived_tasks()
-        archived = self.task_manager.get_archived_tasks()
+        archived_count = self.load_archived_tasks()
 
         header_actions = []
-        if archived:
+        if archived_count > 0:
             header_actions.append(
                 ft.OutlinedButton(
                     "Очистить архив",
@@ -2359,7 +2394,7 @@ class ScheduleScreen:
                             spacing=10,
                         ),
                         ft.Text(
-                            f"Завершенные задачи, отправленные на долгосрочное хранение ({len(archived)})",
+                            f"Завершенные задачи, отправленные на долгосрочное хранение ({archived_count})",
                             size=13,
                             color=ft.Colors.GREY_400,
                         ),
@@ -2623,7 +2658,7 @@ class ScheduleScreen:
         ai_chip = None
         if task.expected_time is not None:
             try:
-                pred = TimePredictor().predict_time(task.subject_id, task.expected_time)
+                pred = self.predictor.predict_time(task.subject_id, task.expected_time)
                 if not pred.cold_start:
                     ai_mins = round(pred.predicted_time * 60, 1)
                     ai_chip = ft.Container(
@@ -2928,8 +2963,8 @@ class ScheduleScreen:
         )
 
         # ── Tasks with this tag ──────────────────────────
-        all_tasks = self.task_manager.get_tasks_by_subject(tag.id)
-        task_count = len(all_tasks)
+        task_count = self.task_manager.get_task_count_by_subject(tag.id)
+        all_tasks = self.task_manager.get_tasks_by_subject(tag.id, limit=5)
 
         tasks_summary = ft.Container(
             padding=10,
@@ -2947,7 +2982,7 @@ class ScheduleScreen:
                     ),
                 ] + ([
                     ft.Text(f"• {t.name}", size=11, color=ft.Colors.GREY_300, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
-                    for t in all_tasks[:5]
+                    for t in all_tasks
                 ] if all_tasks else [ft.Text("Нет привязанных задач", size=11, color=ft.Colors.GREY_500)]),
             ),
         )
@@ -3166,6 +3201,7 @@ class ScheduleScreen:
         self._render_sidebar()
         self._render_content()
         self.page.update()
+        gc.collect(1)
 
     # ──────────────────────────────────────────
     # Dialog Handlers

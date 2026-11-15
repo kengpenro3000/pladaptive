@@ -28,7 +28,7 @@ from database.models import History, Task, TaskStatus
 # ──────────────────────────────────────────────
 # Result container
 # ──────────────────────────────────────────────
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Prediction:
     """Holds the prediction result together with debug info."""
 
@@ -45,6 +45,9 @@ class Prediction:
 class TimePredictor:
     """Calculate a time-correction coefficient per subject from History data.
 
+    Caches calculated coefficients in memory to prevent executing redundant
+    aggregate SQL queries during list renders.
+
     Parameters
     ----------
     min_history : int
@@ -53,28 +56,23 @@ class TimePredictor:
         unchanged (cold-start fallback, coefficient = 1.0).
     """
 
+    _cache: dict[int, tuple[float, int, bool]] = {}
+
     def __init__(self, min_history: int = 3) -> None:
         self.min_history = min_history
 
-    # ── core logic ────────────────────────────
-    def predict_time(
-        self,
-        subject_id: int,
-        expected_time: float,
-    ) -> Prediction:
-        """Return a corrected time estimate for a new task.
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Invalidate cached coefficients when task completions or actual times change."""
+        cls._cache.clear()
 
-        Args:
-            subject_id: FK to the subject the task belongs to.
-            expected_time: The user's raw estimate (hours).
+    def get_subject_coefficient(self, subject_id: int) -> tuple[float, int, bool]:
+        """Fetch or calculate (coefficient, completed_tasks, cold_start) for a subject."""
+        if subject_id in self._cache:
+            return self._cache[subject_id]
 
-        Returns:
-            A :class:`Prediction` with the adjusted time and metadata.
-        """
         session: Session = SessionLocal()
         try:
-            # One query: aggregate actual_time and expected_time across
-            # completed tasks that belong to the given subject.
             row = (
                 session.query(
                     func.count(History.id).label("cnt"),
@@ -94,28 +92,42 @@ class TimePredictor:
             sum_actual: float = row.sum_actual or 0.0
             sum_expected: float = row.sum_expected or 0.0
 
-            # Cold start — not enough data
             if completed < self.min_history or sum_expected == 0:
-                return Prediction(
-                    expected_time=expected_time,
-                    predicted_time=expected_time,
-                    coefficient=1.0,
-                    completed_tasks=completed,
-                    cold_start=True,
-                )
+                res = (1.0, completed, True)
+            else:
+                coefficient = round(sum_actual / sum_expected, 4)
+                res = (coefficient, completed, False)
 
-            coefficient = sum_actual / sum_expected
-            predicted = round(expected_time * coefficient, 4)
-
-            return Prediction(
-                expected_time=expected_time,
-                predicted_time=predicted,
-                coefficient=round(coefficient, 4),
-                completed_tasks=completed,
-                cold_start=False,
-            )
+            self._cache[subject_id] = res
+            return res
         finally:
             session.close()
+
+    # ── core logic ────────────────────────────
+    def predict_time(
+        self,
+        subject_id: int,
+        expected_time: float,
+    ) -> Prediction:
+        """Return a corrected time estimate for a new task using cached coefficients.
+
+        Args:
+            subject_id: FK to the subject the task belongs to.
+            expected_time: The user's raw estimate (hours).
+
+        Returns:
+            A :class:`Prediction` with the adjusted time and metadata.
+        """
+        coefficient, completed, cold_start = self.get_subject_coefficient(subject_id)
+        predicted = round(expected_time * coefficient, 4) if not cold_start else expected_time
+
+        return Prediction(
+            expected_time=expected_time,
+            predicted_time=predicted,
+            coefficient=coefficient,
+            completed_tasks=completed,
+            cold_start=cold_start,
+        )
 
 
 # ──────────────────────────────────────────────

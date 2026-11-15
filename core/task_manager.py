@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Generator
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database.db_config import SessionLocal, init_db as _init_db
@@ -215,19 +216,95 @@ class TaskManager:
                 _ = t.subject
             return tasks
 
-    def get_tasks_by_subject(self, subject_id: int, include_archived: bool = False) -> list[Task]:
-        """Return all tasks belonging to a given subject."""
+    def get_tasks_by_subject(
+        self,
+        subject_id: int,
+        include_archived: bool = False,
+        limit: int | None = None,
+    ) -> list[Task]:
+        """Return all tasks belonging to a given subject, with optional limit."""
         with self._session() as session:
             query = session.query(Task).filter(Task.subject_id == subject_id)
             if not include_archived:
                 query = query.filter((Task.is_archived == False) | (Task.is_archived.is_(None)))
-            tasks = (
-                query.order_by(Task.deadline)
-                .all()
-            )
+            query = query.order_by(Task.deadline)
+            if limit is not None:
+                query = query.limit(limit)
+            tasks = query.all()
             for t in tasks:
                 _ = t.subject
             return tasks
+
+    def get_task_counts_by_subject(self) -> dict[int, int]:
+        """Return {subject_id: task_count} using SQL GROUP BY without loading Task objects into memory."""
+        with self._session() as session:
+            rows = (
+                session.query(Task.subject_id, func.count(Task.id))
+                .filter((Task.is_archived == False) | (Task.is_archived.is_(None)))
+                .group_by(Task.subject_id)
+                .all()
+            )
+            return {r[0]: r[1] for r in rows}
+
+    def get_task_count_by_subject(self, subject_id: int) -> int:
+        """Return task count for a single subject without loading Task objects."""
+        with self._session() as session:
+            return (
+                session.query(func.count(Task.id))
+                .filter(
+                    Task.subject_id == subject_id,
+                    (Task.is_archived == False) | (Task.is_archived.is_(None)),
+                )
+                .scalar()
+                or 0
+            )
+
+    def get_sidebar_stats(self, target_date: date | None = None) -> dict[str, int]:
+        """Compute sidebar badge counts and statistics using fast SQL count aggregations."""
+        target = target_date or date.today()
+        end_of_day = datetime.combine(target, datetime.max.time())
+        not_archived = (Task.is_archived == False) | (Task.is_archived.is_(None))
+
+        with self._session() as session:
+            today_active = session.query(func.count(Task.id)).filter(
+                not_archived,
+                Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]),
+                (
+                    (Task.scheduled_date == target)
+                    | (Task.scheduled_date < target)
+                    | (Task.scheduled_date.is_(None) & (Task.deadline <= end_of_day))
+                ),
+            ).scalar() or 0
+
+            today_completed = session.query(func.count(Task.id)).filter(
+                not_archived,
+                Task.status == TaskStatus.COMPLETED,
+                Task.completed_at == target,
+            ).scalar() or 0
+
+            all_active = session.query(func.count(Task.id)).filter(
+                not_archived,
+                Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]),
+            ).scalar() or 0
+
+            tags_count = session.query(func.count(Subject.id)).scalar() or 0
+
+            completed_total = session.query(func.count(Task.id)).filter(
+                Task.status == TaskStatus.COMPLETED,
+            ).scalar() or 0
+
+            archived_count = session.query(func.count(Task.id)).filter(
+                Task.is_archived == True,
+            ).scalar() or 0
+
+            return {
+                "today_active": today_active,
+                "today_completed": today_completed,
+                "all_active": all_active,
+                "tags_count": tags_count,
+                "completed_total": completed_total,
+                "archived_count": archived_count,
+            }
 
     def get_task_by_id(self, task_id: int) -> Task | None:
         """Return a single task or ``None``."""
@@ -398,6 +475,7 @@ class TaskManager:
             session.add(history)
             session.flush()
             _ = task.subject
+            TimePredictor.clear_cache()
             return task
 
     def reopen_task(self, task_id: int) -> Task:
@@ -412,6 +490,7 @@ class TaskManager:
             task.is_archived = False
             session.flush()
             _ = task.subject
+            TimePredictor.clear_cache()
             return task
 
     # ──────────────────────────────────────────
@@ -491,6 +570,7 @@ class TaskManager:
             if task is None:
                 return False
             session.delete(task)
+            TimePredictor.clear_cache()
             return True
 
     def clear_archive(self) -> int:
@@ -501,6 +581,7 @@ class TaskManager:
             for t in tasks:
                 session.delete(t)
             session.flush()
+            TimePredictor.clear_cache()
             return count
 
     def complete_all_active_tasks(self, task_ids: list[int] | None = None) -> int:
@@ -533,6 +614,7 @@ class TaskManager:
                 session.add(hist)
                 count += 1
             session.flush()
+            TimePredictor.clear_cache()
             return count
 
     # ──────────────────────────────────────────
