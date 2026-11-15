@@ -1547,6 +1547,12 @@ class ScheduleScreen:
                     icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
                     on_click=lambda _: self.toggle_right_panel(),
                 ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS_ROUNDED,
+                    tooltip="Настройки",
+                    icon_color=ft.Colors.GREY_400,
+                    on_click=lambda _: self.open_settings_dialog(),
+                ),
             ],
         )
 
@@ -1714,6 +1720,12 @@ class ScheduleScreen:
                     tooltip="Панель описания задачи",
                     icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
                     on_click=lambda _: self.toggle_right_panel(),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS_ROUNDED,
+                    tooltip="Настройки",
+                    icon_color=ft.Colors.GREY_400,
+                    on_click=lambda _: self.open_settings_dialog(),
                 ),
             ],
         )
@@ -2083,6 +2095,12 @@ class ScheduleScreen:
                     icon_color=ft.Colors.CYAN_300 if (self.right_panel_open and self.right_panel_mode == "tag") else ft.Colors.GREY_400,
                     on_click=lambda _: self.toggle_right_panel(),
                 ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS_ROUNDED,
+                    tooltip="Настройки",
+                    icon_color=ft.Colors.GREY_400,
+                    on_click=lambda _: self.open_settings_dialog(),
+                ),
             ],
         )
 
@@ -2420,6 +2438,14 @@ class ScheduleScreen:
                 tooltip="Панель описания задачи",
                 icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
                 on_click=lambda _: self.toggle_right_panel(),
+            )
+        )
+        header_actions.append(
+            ft.IconButton(
+                icon=ft.Icons.SETTINGS_ROUNDED,
+                tooltip="Настройки",
+                icon_color=ft.Colors.GREY_400,
+                on_click=lambda _: self.open_settings_dialog(),
             )
         )
 
@@ -3269,7 +3295,8 @@ class ScheduleScreen:
     def render(self) -> None:
         """Assemble the complete layout (sidebar + content) on the page."""
         self.page.title = "Умное расписание"
-        self.page.theme_mode = ft.ThemeMode.DARK
+        if not hasattr(self.page, "theme_mode") or self.page.theme_mode is None:
+            self.page.theme_mode = ft.ThemeMode.DARK
         self.page.theme = ft.Theme(
             font_family="Roboto, Segoe UI, -apple-system, sans-serif",
             use_material3=True,
@@ -3578,6 +3605,284 @@ class ScheduleScreen:
             actions_alignment=ft.MainAxisAlignment.END,
         )
         _show_dialog(self.page, confirm_dialog)
+
+    def set_theme_mode(self, mode: ft.ThemeMode) -> None:
+        """Switch application theme mode (Light or Dark)."""
+        self.page.theme_mode = mode
+        if mode == ft.ThemeMode.LIGHT:
+            self.right_panel_container.bgcolor = ft.Colors.with_opacity(0.92, "#F8F9FA")
+            self.right_panel_barrier.bgcolor = ft.Colors.with_opacity(0.20, ft.Colors.BLACK)
+        else:
+            self.right_panel_container.bgcolor = ft.Colors.with_opacity(0.70, "#161822")
+            self.right_panel_barrier.bgcolor = ft.Colors.with_opacity(0.35, ft.Colors.BLACK)
+        self.refresh()
+
+    def open_settings_dialog(self) -> None:
+        """Open the Settings modal dialog with Interface, App Options, and Shortcuts tabs."""
+        active_tab_idx = [0]  # 0: Интерфейс, 1: Опции приложения, 2: Шорткаты
+        content_holder = ft.Container(expand=True)
+        tab_buttons_holder = ft.Row(spacing=6)
+
+        def _get_tab_content() -> ft.Control:
+            idx = active_tab_idx[0]
+            if idx == 0:
+                # Вкладка 1: «Интерфейс» (смена темы)
+                is_dark = (self.page.theme_mode != ft.ThemeMode.LIGHT)
+
+                def _on_theme_toggle(e):
+                    new_mode = ft.ThemeMode.DARK if e.control.value else ft.ThemeMode.LIGHT
+                    self.set_theme_mode(new_mode)
+                    _update_dialog_view()
+
+                def _set_dark(_):
+                    self.set_theme_mode(ft.ThemeMode.DARK)
+                    _update_dialog_view()
+
+                def _set_light(_):
+                    self.set_theme_mode(ft.ThemeMode.LIGHT)
+                    _update_dialog_view()
+
+                dark_selected = (self.page.theme_mode != ft.ThemeMode.LIGHT)
+                light_selected = (self.page.theme_mode == ft.ThemeMode.LIGHT)
+
+                dark_card = ft.Container(
+                    expand=True,
+                    padding=16,
+                    border_radius=12,
+                    border=ft.Border.all(2, ft.Colors.PRIMARY if dark_selected else ft.Colors.OUTLINE_VARIANT),
+                    bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if dark_selected else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    ink=True,
+                    on_click=_set_dark,
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                        controls=[
+                            ft.Icon(ft.Icons.DARK_MODE_ROUNDED, size=28, color=ft.Colors.PRIMARY if dark_selected else ft.Colors.GREY_400),
+                            ft.Text("Тёмная тема", size=13, weight=ft.FontWeight.BOLD if dark_selected else ft.FontWeight.NORMAL),
+                        ],
+                    ),
+                )
+
+                light_card = ft.Container(
+                    expand=True,
+                    padding=16,
+                    border_radius=12,
+                    border=ft.Border.all(2, ft.Colors.PRIMARY if light_selected else ft.Colors.OUTLINE_VARIANT),
+                    bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if light_selected else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    ink=True,
+                    on_click=_set_light,
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                        controls=[
+                            ft.Icon(ft.Icons.LIGHT_MODE_ROUNDED, size=28, color=ft.Colors.PRIMARY if light_selected else ft.Colors.GREY_400),
+                            ft.Text("Светлая тема", size=13, weight=ft.FontWeight.BOLD if light_selected else ft.FontWeight.NORMAL),
+                        ],
+                    ),
+                )
+
+                theme_switch_tile = ft.Container(
+                    padding=ft.Padding(14, 10, 14, 10),
+                    border_radius=10,
+                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    content=ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        controls=[
+                            ft.Row(
+                                spacing=10,
+                                controls=[
+                                    ft.Icon(
+                                        ft.Icons.DARK_MODE_ROUNDED if is_dark else ft.Icons.LIGHT_MODE_ROUNDED,
+                                        color=ft.Colors.PRIMARY,
+                                        size=22,
+                                    ),
+                                    ft.Column(
+                                        spacing=2,
+                                        controls=[
+                                            ft.Text("Тема интерфейса", size=14, weight=ft.FontWeight.W_600),
+                                            ft.Text("Переключение между светлой и темной темой", size=12, color=ft.Colors.GREY_400),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                            ft.Switch(
+                                value=is_dark,
+                                active_color=ft.Colors.PRIMARY,
+                                tooltip="Включить темную тему" if not is_dark else "Включить светлую тему",
+                                on_change=_on_theme_toggle,
+                            ),
+                        ],
+                    ),
+                )
+
+                return ft.Column(
+                    spacing=14,
+                    controls=[
+                        ft.Text("Оформление темы", size=15, weight=ft.FontWeight.BOLD),
+                        ft.Row(spacing=12, controls=[dark_card, light_card]),
+                        theme_switch_tile,
+                    ],
+                )
+
+            elif idx == 1:
+                # Вкладка 2: «Опции приложения»
+                return ft.Container(
+                    alignment=ft.Alignment(0, 0),
+                    padding=20,
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=10,
+                        controls=[
+                            ft.Icon(ft.Icons.TUNE_ROUNDED, size=44, color=ft.Colors.GREY_500),
+                            ft.Text("Опции приложения", size=16, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "В этом разделе появятся дополнительные параметры и настройки приложения.",
+                                size=13,
+                                color=ft.Colors.GREY_400,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                    ),
+                )
+
+            else:
+                # Вкладка 3: «Шорткаты»
+                return ft.Column(
+                    spacing=12,
+                    controls=[
+                        ft.Text("Горячие клавиши", size=15, weight=ft.FontWeight.BOLD),
+                        ft.Container(
+                            padding=12,
+                            border_radius=8,
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
+                                    ft.Text("Закрыть правую панель или окно настроек", size=13),
+                                    ft.Container(
+                                        padding=ft.Padding(8, 3, 8, 3),
+                                        border_radius=6,
+                                        border=ft.Border.all(1, ft.Colors.OUTLINE),
+                                        content=ft.Text("Esc", size=12, weight=ft.FontWeight.BOLD),
+                                    ),
+                                ],
+                            ),
+                        ),
+                        ft.Container(
+                            padding=12,
+                            border_radius=8,
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
+                                    ft.Text("Быстрое сохранение задачи или тега", size=13),
+                                    ft.Container(
+                                        padding=ft.Padding(8, 3, 8, 3),
+                                        border_radius=6,
+                                        border=ft.Border.all(1, ft.Colors.OUTLINE),
+                                        content=ft.Text("Enter", size=12, weight=ft.FontWeight.BOLD),
+                                    ),
+                                ],
+                            ),
+                        ),
+                        ft.Text(
+                            "Пользовательская настройка сочетаний клавиш появится в будущих обновлениях.",
+                            size=12,
+                            color=ft.Colors.GREY_400,
+                            italic=True,
+                        ),
+                    ],
+                )
+
+        def _select_tab(idx: int):
+            active_tab_idx[0] = idx
+            _update_dialog_view()
+
+        def _update_dialog_view():
+            tab_defs = [
+                (0, "Интерфейс", ft.Icons.PALETTE_ROUNDED),
+                (1, "Опции приложения", ft.Icons.TUNE_ROUNDED),
+                (2, "Шорткаты", ft.Icons.KEYBOARD_ROUNDED),
+            ]
+            tab_buttons = []
+            for t_idx, t_label, t_icon in tab_defs:
+                is_sel = (active_tab_idx[0] == t_idx)
+                tab_buttons.append(
+                    ft.Container(
+                        content=ft.Row(
+                            spacing=6,
+                            tight=True,
+                            controls=[
+                                ft.Icon(t_icon, size=16, color=ft.Colors.WHITE if is_sel else ft.Colors.GREY_400),
+                                ft.Text(
+                                    t_label,
+                                    size=13,
+                                    weight=ft.FontWeight.BOLD if is_sel else ft.FontWeight.W_500,
+                                    color=ft.Colors.WHITE if is_sel else ft.Colors.GREY_300,
+                                ),
+                            ],
+                        ),
+                        bgcolor=ft.Colors.PRIMARY if is_sel else ft.Colors.TRANSPARENT,
+                        padding=ft.Padding(12, 8, 12, 8),
+                        border_radius=8,
+                        ink=True,
+                        on_click=lambda _, idx=t_idx: _select_tab(idx),
+                    )
+                )
+
+            tab_buttons_holder.controls = tab_buttons
+            content_holder.content = _get_tab_content()
+            self.page.update()
+
+        _update_dialog_view()
+
+        settings_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Row(
+                        spacing=10,
+                        controls=[
+                            ft.Icon(ft.Icons.SETTINGS_ROUNDED, color=ft.Colors.PRIMARY, size=24),
+                            ft.Text("Настройки", size=20, weight=ft.FontWeight.BOLD),
+                        ],
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE_ROUNDED,
+                        icon_size=20,
+                        tooltip="Закрыть",
+                        on_click=lambda _: _close_dialog(self.page, settings_dialog),
+                    ),
+                ],
+            ),
+            content=ft.Container(
+                width=520,
+                height=320,
+                content=ft.Column(
+                    spacing=14,
+                    controls=[
+                        ft.Container(
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                            padding=4,
+                            border_radius=10,
+                            content=tab_buttons_holder,
+                        ),
+                        ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                        content_holder,
+                    ],
+                ),
+            ),
+            actions=[
+                ft.TextButton(
+                    "Закрыть",
+                    on_click=lambda _: _close_dialog(self.page, settings_dialog),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        _show_dialog(self.page, settings_dialog)
 
 
 def main_view(page: ft.Page) -> None:
