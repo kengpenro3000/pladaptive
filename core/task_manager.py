@@ -21,6 +21,7 @@ from database.models import (
     TaskPriority,
     TaskStatus,
 )
+from ai.predictor import Prediction, TimePredictor
 
 
 class TaskManager:
@@ -96,7 +97,12 @@ class TaskManager:
     ) -> Task:
         """Create a new task linked to an existing subject.
 
-        Returns the persisted :class:`Task` instance.
+        If *expected_time* is provided, the method runs it through
+        :class:`TimePredictor` to produce a corrected estimate and prints
+        a human-readable notification to stdout.
+
+        Returns:
+            The persisted :class:`Task` instance.
 
         Raises:
             ValueError: if *subject_id* does not match any subject.
@@ -119,7 +125,33 @@ class TaskManager:
             )
             session.add(task)
             session.flush()
-            return task
+
+        # Run prediction after session closes to avoid nested transactions
+        if expected_time is not None:
+            predictor = TimePredictor()
+            prediction = predictor.predict_time(subject_id, expected_time)
+
+            expected_min = prediction.expected_time * 60
+            predicted_min = prediction.predicted_time * 60
+
+            def _fmt(val: float) -> str:
+                r = round(val, 1)
+                return str(int(r)) if r.is_integer() else f"{r:.1f}"
+
+            msg = (
+                f"Задача добавлена. Ожидаемое время: {_fmt(expected_min)} мин. "
+                f"С учетом вашей истории, предсказанное время: {_fmt(predicted_min)} мин."
+            )
+            print(msg)
+            task.prediction = prediction
+            task.prediction_message = msg
+        else:
+            msg = "Задача добавлена."
+            print(msg)
+            task.prediction = None
+            task.prediction_message = msg
+
+        return task
 
     def get_all_tasks(self) -> list[Task]:
         """Return every task ordered by deadline (nulls last), then priority."""
