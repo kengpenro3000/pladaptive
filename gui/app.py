@@ -62,6 +62,20 @@ class ScheduleScreen:
         "понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"
     ]
 
+    TAG_PRESET_ICONS = ["🏷️", "📚", "💻", "🔬", "📐", "🎨", "📝", "💡", "⚡", "🎯", "🌐", "🧪", "📈", "☕", "🚀", "💼"]
+    TAG_PRESET_COLORS = [
+        ("#4CAF50", "Зеленый"),
+        ("#2196F3", "Синий"),
+        ("#9C27B0", "Фиолетовый"),
+        ("#FF9800", "Оранжевый"),
+        ("#E91E63", "Розовый"),
+        ("#F44336", "Красный"),
+        ("#00BCD4", "Бирюзовый"),
+        ("#FFC107", "Янтарный"),
+        ("#607D8B", "Серо-голубой"),
+        ("#3F51B5", "Индиго"),
+    ]
+
     def __init__(self, page: ft.Page) -> None:
         self.page = page
         self.scheduler = TaskScheduler()
@@ -81,19 +95,26 @@ class ScheduleScreen:
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
 
-        # Quick-add row state
+        # Quick-add task row state
         self._last_selected_subject_id: str | None = None
         self._last_selected_priority: str = TaskPriority.MEDIUM.value
         self._last_expected_minutes: str = "60"
         self._last_selected_date: date | None = None
         self._quick_add_name_field: ft.TextField | None = None
 
+        # Quick-add tag row state
+        self._last_tag_icon: str = "🏷️"
+        self._last_tag_color: str = "#4CAF50"
+        self._quick_add_tag_name_field: ft.TextField | None = None
+
         # Resizer handle between sidebar and content
         self.resizer_handle = self._build_resizer_handle()
 
-        # Right overlay panel state (opens on top of tasks without shifting them)
+        # Right overlay panel state (opens on top without shifting main list)
         self.right_panel_open: bool = False
+        self.right_panel_mode: str = "task"  # "task" or "tag"
         self.selected_task_id: int | None = None
+        self.selected_tag_id: int | None = None
         self.right_panel_width: int = 400
         self.right_panel_container: ft.Container = self._build_right_panel_container()
 
@@ -1743,7 +1764,7 @@ class ScheduleScreen:
             icon_size=18,
             tooltip="Редактировать тег",
             icon_color=ft.Colors.PRIMARY,
-            on_click=lambda _, t=tag: self.open_edit_tag_dialog(t),
+            on_click=lambda _, t=tag: self.open_right_tag_panel(t),
         )
 
         delete_btn = ft.IconButton(
@@ -1754,14 +1775,22 @@ class ScheduleScreen:
             on_click=lambda _, t=tag, cnt=task_count: self.confirm_delete_tag(t, cnt),
         )
 
+        is_selected = (self.selected_tag_id == tag.id and self.right_panel_open and self.right_panel_mode == "tag")
+        card_border = (
+            ft.Border.all(1.5, ft.Colors.CYAN_400)
+            if is_selected
+            else None
+        )
+
         return ft.Card(
-            elevation=1,
+            elevation=1 if not is_selected else 2,
             content=ft.Container(
                 padding=ft.Padding(left=10, top=6, right=8, bottom=6),
                 border_radius=10,
+                border=card_border,
                 ink=True,
-                tooltip="Нажмите, чтобы изменить тег",
-                on_click=lambda _, t=tag: self.open_edit_tag_dialog(t),
+                tooltip="Нажмите, чтобы открыть и редактировать параметры тега",
+                on_click=lambda _, t=tag: self.open_right_tag_panel(t),
                 content=ft.Row(
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1831,9 +1860,159 @@ class ScheduleScreen:
                 cnt = task_counts.get(tag.id, 0)
                 self.tags_column.controls.append(self.build_tag_card(tag, cnt))
 
+    def _build_quick_add_tag_bar(self) -> ft.Control:
+        """Build an inline quick-add bar for tags in the same compact icon-based design."""
+        selected_icon = [self._last_tag_icon or "🏷️"]
+        selected_color = [self._last_tag_color or "#4CAF50"]
+
+        # 1. Icon selector
+        icon_display = ft.Text(selected_icon[0], size=18)
+
+        def _set_icon(ico: str) -> None:
+            selected_icon[0] = ico
+            self._last_tag_icon = ico
+            icon_display.value = ico
+            icon_btn.tooltip = f"Иконка: {ico} (нажмите для выбора)"
+            self.page.update()
+
+        icon_btn = ft.PopupMenuButton(
+            content=ft.Container(
+                content=icon_display,
+                padding=ft.Padding(6, 6, 6, 6),
+                border_radius=8,
+                ink=True,
+            ),
+            tooltip=f"Иконка: {selected_icon[0]} (нажмите для выбора)",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text(ico, size=18), ft.Text(f" {ico}", size=13)], spacing=6),
+                    on_click=lambda _, ico=ico: _set_icon(ico),
+                )
+                for ico in self.TAG_PRESET_ICONS
+            ],
+        )
+
+        # 2. Color selector
+        color_circle = ft.Container(
+            width=20,
+            height=20,
+            border_radius=10,
+            bgcolor=selected_color[0],
+            border=ft.Border.all(1.5, ft.Colors.WHITE),
+        )
+
+        def _set_color(hex_col: str, name_col: str) -> None:
+            selected_color[0] = hex_col
+            self._last_tag_color = hex_col
+            color_circle.bgcolor = hex_col
+            color_btn.tooltip = f"Цвет: {name_col} (нажмите для выбора)"
+            self.page.update()
+
+        init_col_name = next((name for h, name in self.TAG_PRESET_COLORS if h == selected_color[0]), "Зеленый")
+        color_btn = ft.PopupMenuButton(
+            content=ft.Container(
+                content=color_circle,
+                padding=ft.Padding(6, 6, 6, 6),
+                border_radius=8,
+                ink=True,
+            ),
+            tooltip=f"Цвет: {init_col_name} (нажмите для выбора)",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Container(width=16, height=16, border_radius=8, bgcolor=h),
+                            ft.Text(f" {name}", size=13),
+                        ],
+                        spacing=8,
+                    ),
+                    on_click=lambda _, h=h, name=name: _set_color(h, name),
+                )
+                for h, name in self.TAG_PRESET_COLORS
+            ],
+        )
+
+        # 3. Name field
+        name_field = ft.TextField(
+            hint_text="Новый тег / предмет... (Enter для сохранения)",
+            prefix_icon=ft.Icons.LOCAL_OFFER_ROUNDED,
+            dense=True,
+            text_size=13,
+            expand=True,
+            autofocus=False,
+            tooltip="Название нового тега (нажмите Enter для сохранения)",
+            on_submit=lambda _: _submit(),
+        )
+        self._quick_add_tag_name_field = name_field
+
+        # 4. Add button
+        add_btn = ft.IconButton(
+            icon=ft.Icons.ADD_ROUNDED,
+            bgcolor=ft.Colors.PRIMARY,
+            icon_color=ft.Colors.WHITE,
+            icon_size=20,
+            tooltip="Создать тег (Enter)",
+            on_click=lambda _: _submit(),
+        )
+
+        def _submit(e: ft.ControlEvent | None = None) -> None:
+            title = (name_field.value or "").strip()
+            if not title:
+                name_field.error_text = "Введите название тега"
+                self.page.update()
+                return
+
+            name_field.error_text = None
+            try:
+                self.task_manager.add_subject(
+                    name=title,
+                    color=selected_color[0],
+                    icon=selected_icon[0],
+                )
+                _show_snack(self.page, f"Тег «{title}» успешно создан!")
+                name_field.value = ""
+                self.refresh()
+                self._focus_control(self._quick_add_tag_name_field)
+            except Exception as err:
+                _show_snack(self.page, f"Ошибка при создании тега: {err}", bgcolor=ft.Colors.RED_800)
+
+        row_layout = ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                name_field,
+                icon_btn,
+                color_btn,
+                add_btn,
+            ],
+        )
+
+        return ft.Card(
+            elevation=1,
+            content=ft.Container(
+                padding=ft.Padding(left=8, top=4, right=6, bottom=4),
+                border_radius=10,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.18, ft.Colors.OUTLINE)),
+                content=row_layout,
+            ),
+        )
+
     def _render_tags_view(self) -> ft.Control:
         """Build the full 'Теги и предметы' screen view."""
         self.load_tags()
+
+        header_actions = ft.Row(
+            spacing=6,
+            controls=[
+                ft.IconButton(
+                    icon=ft.Icons.VIEW_SIDEBAR_ROUNDED,
+                    tooltip="Панель параметров тега",
+                    icon_color=ft.Colors.CYAN_300 if (self.right_panel_open and self.right_panel_mode == "tag") else ft.Colors.GREY_400,
+                    on_click=lambda _: self.toggle_right_panel(),
+                ),
+            ],
+        )
 
         header = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -1858,17 +2037,13 @@ class ScheduleScreen:
                             spacing=10,
                         ),
                         ft.Text(
-                            "Управление тегами: добавляйте, удаляйте, задавайте цвета и UTF-иконки",
+                            "Управление тегами: добавляйте в строку, редактируйте параметры и цвета",
                             size=13,
                             color=ft.Colors.GREY_400,
                         ),
                     ],
                 ),
-                FilledBtn(
-                    "Создать тег",
-                    icon=ft.Icons.ADD_ROUNDED,
-                    on_click=lambda _: self.open_add_tag_dialog(),
-                ),
+                header_actions,
             ],
         )
 
@@ -1877,6 +2052,7 @@ class ScheduleScreen:
             expand=True,
             controls=[
                 header,
+                self._build_quick_add_tag_bar(),
                 ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
                 self.tags_column,
             ],
@@ -2517,9 +2693,297 @@ class ScheduleScreen:
 
         col.controls = col_controls
 
+    def _render_right_tag_panel_content(self, tag: Subject | None = None) -> None:
+        """Populate the right overlay panel with editable tag properties and live preview."""
+        col = self.right_panel_container.content
+        if not isinstance(col, ft.Column):
+            col = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=14)
+            self.right_panel_container.content = col
+        col.controls.clear()
+
+        if tag is None and self.selected_tag_id:
+            tag = self.task_manager.get_subject_by_id(self.selected_tag_id)
+
+        if tag is None:
+            col.controls.extend([
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Text("Параметры тега", size=16, weight=ft.FontWeight.BOLD),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE_ROUNDED,
+                            tooltip="Закрыть панель",
+                            icon_size=20,
+                            on_click=lambda _: self.close_right_panel(),
+                        ),
+                    ],
+                ),
+                ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                ft.Container(
+                    padding=40,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=12,
+                        controls=[
+                            ft.Icon(ft.Icons.LOCAL_OFFER_OUTLINED, size=40, color=ft.Colors.GREY_500),
+                            ft.Text("Тег не выбран", size=15, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "Нажмите на любой тег в списке, чтобы открыть и редактировать его параметры.",
+                                size=13,
+                                color=ft.Colors.GREY_400,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                    ),
+                ),
+            ])
+            return
+
+        cur_color = [tag.color or "#4CAF50"]
+        cur_icon = [tag.icon or "🏷️"]
+
+        # ── Header ──────────────────────────────────────
+        header = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                ft.Row(
+                    spacing=8,
+                    controls=[
+                        ft.Icon(ft.Icons.LOCAL_OFFER_ROUNDED, color=ft.Colors.PRIMARY, size=22),
+                        ft.Text("Карточка тега", size=16, weight=ft.FontWeight.BOLD),
+                    ],
+                ),
+                ft.Row(
+                    spacing=0,
+                    controls=[
+                        ft.IconButton(
+                            icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                            tooltip="Открыть в модальном окне",
+                            icon_size=18,
+                            icon_color=ft.Colors.GREY_400,
+                            on_click=lambda _, t=tag: self.open_edit_tag_dialog(t),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE_ROUNDED,
+                            tooltip="Закрыть панель (Esc)",
+                            icon_size=20,
+                            icon_color=ft.Colors.GREY_300,
+                            on_click=lambda _: self.close_right_panel(),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        # ── Live Preview Badge ───────────────────────────
+        preview_icon = ft.Text(cur_icon[0], size=16)
+        preview_name = ft.Text(tag.name, size=13, weight=ft.FontWeight.W_600, color=cur_color[0])
+        preview_box = ft.Container(
+            padding=ft.Padding(left=10, top=5, right=10, bottom=5),
+            border_radius=8,
+            border=ft.Border.all(1, cur_color[0]),
+            bgcolor=ft.Colors.with_opacity(0.15, cur_color[0]),
+            content=ft.Row([preview_icon, preview_name], spacing=6, tight=True),
+        )
+
+        preview_card = ft.Container(
+            padding=10,
+            border_radius=10,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text("Предпросмотр тега:", size=12, color=ft.Colors.GREY_400),
+                    preview_box,
+                ],
+            ),
+        )
+
+        # ── Name Field ──────────────────────────────────
+        name_field = ft.TextField(
+            label="Название тега / предмета",
+            value=tag.name,
+            dense=True,
+            text_size=13,
+        )
+
+        def _update_preview() -> None:
+            preview_name.value = name_field.value or "Без названия"
+            preview_name.color = cur_color[0]
+            preview_icon.value = cur_icon[0]
+            preview_box.border = ft.Border.all(1, cur_color[0])
+            preview_box.bgcolor = ft.Colors.with_opacity(0.15, cur_color[0])
+            self.page.update()
+
+        name_field.on_change = lambda _: _update_preview()
+
+        # ── Color Palette ────────────────────────────────
+        color_containers: list[ft.Container] = []
+
+        def _select_color(col_hex: str) -> None:
+            cur_color[0] = col_hex
+            for cc, (h, _) in zip(color_containers, self.TAG_PRESET_COLORS):
+                is_sel = (h == col_hex)
+                cc.border = ft.Border.all(2.5, ft.Colors.WHITE if is_sel else ft.Colors.TRANSPARENT)
+            _update_preview()
+
+        for h, name in self.TAG_PRESET_COLORS:
+            is_sel = (h == cur_color[0])
+            c_box = ft.Container(
+                width=28,
+                height=28,
+                border_radius=14,
+                bgcolor=h,
+                border=ft.Border.all(2.5, ft.Colors.WHITE if is_sel else ft.Colors.TRANSPARENT),
+                ink=True,
+                tooltip=name,
+                on_click=lambda _, h=h: _select_color(h),
+            )
+            color_containers.append(c_box)
+
+        colors_wrap = ft.Row(
+            wrap=True,
+            spacing=8,
+            run_spacing=8,
+            controls=color_containers,
+        )
+
+        # ── Emoji / Icon Palette ─────────────────────────
+        icon_containers: list[ft.Container] = []
+
+        def _select_icon(ico: str) -> None:
+            cur_icon[0] = ico
+            for ic_box, ic in zip(icon_containers, self.TAG_PRESET_ICONS):
+                is_sel = (ic == ico)
+                ic_box.bgcolor = ft.Colors.with_opacity(0.25, ft.Colors.PRIMARY) if is_sel else ft.Colors.TRANSPARENT
+                ic_box.border = ft.Border.all(1.5, ft.Colors.PRIMARY if is_sel else ft.Colors.with_opacity(0.2, ft.Colors.OUTLINE))
+            _update_preview()
+
+        for ico in self.TAG_PRESET_ICONS:
+            is_sel = (ico == cur_icon[0])
+            i_box = ft.Container(
+                width=34,
+                height=34,
+                border_radius=8,
+                alignment=ft.Alignment(0, 0),
+                bgcolor=ft.Colors.with_opacity(0.25, ft.Colors.PRIMARY) if is_sel else ft.Colors.TRANSPARENT,
+                border=ft.Border.all(1.5, ft.Colors.PRIMARY if is_sel else ft.Colors.with_opacity(0.2, ft.Colors.OUTLINE)),
+                ink=True,
+                tooltip=ico,
+                on_click=lambda _, ico=ico: _select_icon(ico),
+                content=ft.Text(ico, size=18),
+            )
+            icon_containers.append(i_box)
+
+        icons_wrap = ft.Row(
+            wrap=True,
+            spacing=6,
+            run_spacing=6,
+            controls=icon_containers,
+        )
+
+        # ── Tasks with this tag ──────────────────────────
+        all_tasks = self.task_manager.get_tasks_by_subject(tag.id)
+        task_count = len(all_tasks)
+
+        tasks_summary = ft.Container(
+            padding=10,
+            border_radius=10,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Column(
+                spacing=6,
+                controls=[
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        controls=[
+                            ft.Text("Привязанные задачи:", size=12, color=ft.Colors.GREY_400),
+                            ft.Text(f"{task_count} шт.", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
+                        ],
+                    ),
+                ] + ([
+                    ft.Text(f"• {t.name}", size=11, color=ft.Colors.GREY_300, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+                    for t in all_tasks[:5]
+                ] if all_tasks else [ft.Text("Нет привязанных задач", size=11, color=ft.Colors.GREY_500)]),
+            ),
+        )
+
+        # ── Save callback ─────────────────────────────────
+        def _save_tag(e: ft.ControlEvent | None = None) -> None:
+            name_val = (name_field.value or "").strip()
+            if not name_val:
+                name_field.error_text = "Введите название тега"
+                self.page.update()
+                return
+
+            name_field.error_text = None
+            try:
+                updated_tag = self.task_manager.update_subject(
+                    subject_id=tag.id,
+                    name=name_val,
+                    color=cur_color[0],
+                    icon=cur_icon[0],
+                )
+                _show_snack(self.page, f"Тег «{name_val}» успешно обновлен!", bgcolor=ft.Colors.GREEN_800)
+                self.refresh()
+                self._render_right_tag_panel_content(updated_tag)
+                self.page.update()
+            except Exception as err:
+                _show_snack(self.page, f"Ошибка при обновлении тега: {err}", bgcolor=ft.Colors.RED_800)
+
+        save_btn = FilledBtn(
+            "Сохранить изменения",
+            icon=ft.Icons.SAVE_ROUNDED,
+            on_click=_save_tag,
+        )
+
+        delete_btn = ft.IconButton(
+            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+            icon_color=ft.Colors.RED_400,
+            tooltip="Удалить тег",
+            on_click=lambda _, t=tag, cnt=task_count: self.confirm_delete_tag(t, cnt),
+        )
+
+        actions_row = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                save_btn,
+                delete_btn,
+            ],
+        )
+
+        col.controls = [
+            header,
+            ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+            preview_card,
+            name_field,
+            ft.Text("Цвет тега", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+            colors_wrap,
+            ft.Text("Иконка / Эмодзи", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+            icons_wrap,
+            tasks_summary,
+            ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+            actions_row,
+        ]
+
+    def open_right_tag_panel(self, tag: Subject) -> None:
+        """Open the translucent right panel for editing a tag."""
+        self.right_panel_mode = "tag"
+        self.selected_tag_id = tag.id
+        self.selected_task_id = None
+        self.right_panel_open = True
+        w = getattr(self.page, "width", 1000) or 1000
+        self.right_panel_container.width = min(420, max(300, w - 60))
+        self._render_right_tag_panel_content(tag)
+        self.right_panel_container.visible = True
+        self._render_content()
+        self.page.update()
+
     def open_right_panel(self, task: Task) -> None:
         """Open the translucent right panel with editable task description and properties."""
+        self.right_panel_mode = "task"
         self.selected_task_id = task.id
+        self.selected_tag_id = None
         self.right_panel_open = True
         w = getattr(self.page, "width", 1000) or 1000
         self.right_panel_container.width = min(420, max(300, w - 60))
@@ -2532,35 +2996,50 @@ class ScheduleScreen:
         """Close the right overlay panel."""
         self.right_panel_open = False
         self.selected_task_id = None
+        self.selected_tag_id = None
         self.right_panel_container.visible = False
         self._render_content()
         self.page.update()
 
-    def toggle_right_panel(self, task: Task | None = None) -> None:
-        """Toggle right panel visibility."""
+    def toggle_right_panel(self, task: Task | None = None, tag: Subject | None = None) -> None:
+        """Toggle right panel visibility for tasks or tags."""
         if self.right_panel_open:
             self.close_right_panel()
         else:
-            if task:
+            if tag:
+                self.open_right_tag_panel(tag)
+            elif task:
                 self.open_right_panel(task)
-                return
-            if self.selected_task_id:
+            elif self.current_tab == 2:
+                # In tags tab: open tag panel
+                tags = self.task_manager.get_all_subjects()
+                if tags:
+                    self.open_right_tag_panel(tags[0])
+                else:
+                    self.right_panel_mode = "tag"
+                    self.right_panel_open = True
+                    self.right_panel_container.visible = True
+                    self._render_right_tag_panel_content(None)
+                    self.page.update()
+            elif self.selected_task_id:
                 t = self.task_manager.get_task_by_id(self.selected_task_id)
                 if t:
                     self.open_right_panel(t)
                     return
-            today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
-            if today_tasks:
-                self.open_right_panel(today_tasks[0].task)
             else:
-                all_tasks = self.task_manager.get_all_tasks()
-                if all_tasks:
-                    self.open_right_panel(all_tasks[0])
+                today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
+                if today_tasks:
+                    self.open_right_panel(today_tasks[0].task)
                 else:
-                    self.right_panel_open = True
-                    self.right_panel_container.visible = True
-                    self._render_right_panel_content(None)
-                    self.page.update()
+                    all_tasks = self.task_manager.get_all_tasks()
+                    if all_tasks:
+                        self.open_right_panel(all_tasks[0])
+                    else:
+                        self.right_panel_mode = "task"
+                        self.right_panel_open = True
+                        self.right_panel_container.visible = True
+                        self._render_right_panel_content(None)
+                        self.page.update()
 
     # ──────────────────────────────────────────
     # Rendering & View Updates
