@@ -109,29 +109,25 @@ class TaskScheduler:
         self,
         only_today: bool = False,
         target_date: date | None = None,
+        include_completed_today: bool = True,
     ) -> list[ScoredTask]:
-        """Return incomplete tasks sorted by descending urgency score.
+        """Return tasks sorted by descending urgency score.
 
-        If *only_today* is True, filters to tasks scheduled for *target_date*
-        (defaults to date.today()) or past overdue dates, or tasks with deadline <= today.
-        Uses a fresh session internally (context-managed).
+        Pending/active tasks are listed first (sorted by score).
+        If *include_completed_today* is True, tasks completed today are also included
+        at the bottom of the list (for strikethrough rendering).
+        Tasks completed on previous days are automatically excluded (archived).
         """
         session: Session = SessionLocal()
         try:
-            query = (
-                session.query(Task)
-                .options(joinedload(Task.subject))
-                .filter(Task.status.notin_([
-                    TaskStatus.COMPLETED,
-                    TaskStatus.CANCELLED,
-                ]))
-            )
+            target = target_date or date.today()
+            end_of_day = datetime.combine(target, datetime.max.time())
 
             if only_today:
-                target = target_date or date.today()
-                end_of_day = datetime.combine(target, datetime.max.time())
-                query = query.filter(
-                    (
+                # Active incomplete tasks scheduled for today or overdue
+                is_active = (
+                    (Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]))
+                    & (
                         (Task.scheduled_date == target)
                         | (Task.scheduled_date < target)
                         | (
@@ -140,12 +136,38 @@ class TaskScheduler:
                         )
                     )
                 )
+                if include_completed_today:
+                    # Completed today
+                    is_done_today = (
+                        (Task.status == TaskStatus.COMPLETED)
+                        & (Task.completed_at == target)
+                    )
+                    condition = is_active | is_done_today
+                else:
+                    condition = is_active
+            else:
+                # All active tasks
+                is_active = Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED])
+                if include_completed_today:
+                    is_done_today = (
+                        (Task.status == TaskStatus.COMPLETED)
+                        & (Task.completed_at == target)
+                    )
+                    condition = is_active | is_done_today
+                else:
+                    condition = is_active
 
-            tasks: list[Task] = query.all()
+            tasks: list[Task] = (
+                session.query(Task)
+                .options(joinedload(Task.subject))
+                .filter(condition)
+                .all()
+            )
 
             now = datetime.now()
             scored = [self._score_task(t, now) for t in tasks]
-            scored.sort(key=lambda s: s.score, reverse=True)
+            # Active tasks first sorted by score desc, then completed tasks at bottom
+            scored.sort(key=lambda s: (s.task.status == TaskStatus.COMPLETED, -s.score))
             return scored
         finally:
             session.close()

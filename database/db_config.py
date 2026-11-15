@@ -64,4 +64,18 @@ def init_db() -> None:
         if "scheduled_date" not in cols_tasks:
             conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN scheduled_date DATE")
 
+        # Ensure completed_at column exists on tasks table
+        if "completed_at" not in cols_tasks:
+            conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN completed_at DATE")
+            conn.exec_driver_sql("""
+                UPDATE tasks
+                SET completed_at = (
+                    SELECT completed_at FROM history
+                    WHERE history.task_id = tasks.id
+                    ORDER BY history.id DESC
+                    LIMIT 1
+                )
+                WHERE tasks.status = 'completed' AND tasks.completed_at IS NULL
+            """)
+
         conn.commit()

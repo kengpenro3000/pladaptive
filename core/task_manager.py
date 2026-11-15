@@ -384,6 +384,7 @@ class TaskManager:
                 raise ValueError(f"Task with id={task_id} not found.")
 
             task.status = TaskStatus.COMPLETED
+            task.completed_at = completed_at
 
             history = History(
                 task_id=task.id,
@@ -392,6 +393,20 @@ class TaskManager:
             )
             session.add(history)
             session.flush()
+            _ = task.subject
+            return task
+
+    def reopen_task(self, task_id: int) -> Task:
+        """Reopen a completed task back to PENDING status."""
+        with self._session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise ValueError(f"Task with id={task_id} not found.")
+
+            task.status = TaskStatus.PENDING
+            task.completed_at = None
+            session.flush()
+            _ = task.subject
             return task
 
     def complete_all_active_tasks(self, task_ids: list[int] | None = None) -> int:
@@ -414,6 +429,7 @@ class TaskManager:
             today = date.today()
             for t in tasks:
                 t.status = TaskStatus.COMPLETED
+                t.completed_at = today
                 act_time = t.expected_time if t.expected_time is not None else 0.5
                 hist = History(
                     task_id=t.id,

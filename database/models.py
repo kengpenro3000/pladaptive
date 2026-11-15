@@ -118,6 +118,12 @@ class Task(Base):
         nullable=False,
     )
 
+    completed_at: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Date when the task was completed",
+    )
+
     # many-to-one → Subject
     subject: Mapped[Subject] = relationship(back_populates="tasks", lazy="joined")
 
