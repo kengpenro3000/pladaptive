@@ -3154,11 +3154,6 @@ class ScheduleScreen:
         else:
             return
 
-        try:
-            _ = target_list.page
-        except Exception:
-            return
-
         # Estimate approximate offset in case scroll_key is out-of-viewport in virtualized list
         approx_offset = None
         for idx, c in enumerate(target_list.controls):
@@ -3168,7 +3163,7 @@ class ScheduleScreen:
 
         async def _do_scroll():
             import asyncio
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.04)
             try:
                 await target_list.scroll_to(scroll_key=scroll_key, duration=150)
             except Exception:
@@ -3192,11 +3187,6 @@ class ScheduleScreen:
         target_list = self.tags_column
         scroll_key = f"tag_card_{tag_id}"
 
-        try:
-            _ = target_list.page
-        except Exception:
-            return
-
         approx_offset = None
         for idx, c in enumerate(target_list.controls):
             if getattr(c, "key", None) == scroll_key:
@@ -3205,7 +3195,7 @@ class ScheduleScreen:
 
         async def _do_scroll():
             import asyncio
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.04)
             try:
                 await target_list.scroll_to(scroll_key=scroll_key, duration=150)
             except Exception:
@@ -3338,56 +3328,49 @@ class ScheduleScreen:
             elif task:
                 self.open_right_panel(task)
             elif self.current_tab == 2:
-                # In tags tab: open tag panel
-                target_tag = None
-                last_tag_id = getattr(self, "_last_selected_tag_id", None) or self.selected_tag_id
-                if last_tag_id:
-                    target_tag = self.task_manager.get_subject_by_id(last_tag_id)
-                if not target_tag:
-                    tags = self.task_manager.get_all_subjects()
-                    target_tag = tags[0] if tags else None
-                if target_tag:
-                    self.open_right_tag_panel(target_tag)
-                else:
-                    self.right_panel_mode = "tag"
-                    self.right_panel_open = True
-                    self.right_panel_barrier.visible = True
-                    self.right_panel_barrier.opacity = 1.0
-                    self.right_panel_container.visible = True
-                    self.right_panel_container.opacity = 1.0
-                    self._render_right_tag_panel_content(None)
-                    try:
-                        self.right_panel_barrier.update()
-                        self.right_panel_container.update()
-                    except Exception:
-                        self.page.update()
-            elif self.selected_task_id or getattr(self, "_last_selected_task_id", None):
-                target_id = self.selected_task_id or self._last_selected_task_id
-                t = self.task_manager.get_task_by_id(target_id)
-                if t:
-                    self.open_right_panel(t)
-                    return
+                # In tags tab: if a tag is selected, open it; otherwise open empty panel without selecting top tag
+                if self.selected_tag_id:
+                    target_tag = self.task_manager.get_subject_by_id(self.selected_tag_id)
+                    if target_tag:
+                        self.open_right_tag_panel(target_tag)
+                        return
+                self.right_panel_mode = "tag"
+                self.selected_tag_id = None
+                self.right_panel_open = True
+                w = getattr(self.page, "width", 1000) or 1000
+                self.right_panel_container.width = min(420, max(300, w - 60))
+                self._render_right_tag_panel_content(None)
+                self.right_panel_barrier.visible = True
+                self.right_panel_barrier.opacity = 1.0
+                self.right_panel_container.visible = True
+                self.right_panel_container.opacity = 1.0
+                try:
+                    self.right_panel_barrier.update()
+                    self.right_panel_container.update()
+                except Exception:
+                    self.page.update()
             else:
-                today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
-                if today_tasks:
-                    self.open_right_panel(today_tasks[0].task)
-                else:
-                    all_tasks = self.task_manager.get_all_tasks()
-                    if all_tasks:
-                        self.open_right_panel(all_tasks[0])
-                    else:
-                        self.right_panel_mode = "task"
-                        self.right_panel_open = True
-                        self.right_panel_barrier.visible = True
-                        self.right_panel_barrier.opacity = 1.0
-                        self.right_panel_container.visible = True
-                        self.right_panel_container.opacity = 1.0
-                        self._render_right_panel_content(None)
-                        try:
-                            self.right_panel_barrier.update()
-                            self.right_panel_container.update()
-                        except Exception:
-                            self.page.update()
+                # In tasks tabs (0, 1, 3): if a task is selected, open it; otherwise open empty panel without selecting top task
+                if self.selected_task_id:
+                    target_task = self.task_manager.get_task_by_id(self.selected_task_id)
+                    if target_task:
+                        self.open_right_panel(target_task)
+                        return
+                self.right_panel_mode = "task"
+                self.selected_task_id = None
+                self.right_panel_open = True
+                w = getattr(self.page, "width", 1000) or 1000
+                self.right_panel_container.width = min(420, max(300, w - 60))
+                self._render_right_panel_content(None)
+                self.right_panel_barrier.visible = True
+                self.right_panel_barrier.opacity = 1.0
+                self.right_panel_container.visible = True
+                self.right_panel_container.opacity = 1.0
+                try:
+                    self.right_panel_barrier.update()
+                    self.right_panel_container.update()
+                except Exception:
+                    self.page.update()
 
     # ──────────────────────────────────────────
     # Rendering & View Updates
@@ -3779,15 +3762,11 @@ class ScheduleScreen:
         )
         _show_dialog(self.page, confirm_dialog)
 
-    def set_theme_mode(self, mode: ft.ThemeMode) -> None:
-        """Switch application theme mode (Light or Dark)."""
-        self.page.theme_mode = mode
-        if mode == ft.ThemeMode.LIGHT:
-            self.right_panel_container.bgcolor = ft.Colors.with_opacity(0.92, "#F8F9FA")
-            self.right_panel_barrier.bgcolor = ft.Colors.with_opacity(0.20, ft.Colors.BLACK)
-        else:
-            self.right_panel_container.bgcolor = ft.Colors.with_opacity(0.70, "#161822")
-            self.right_panel_barrier.bgcolor = ft.Colors.with_opacity(0.35, ft.Colors.BLACK)
+    def set_theme_mode(self, mode: ft.ThemeMode = ft.ThemeMode.DARK) -> None:
+        """Enforce Dark theme mode."""
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.right_panel_container.bgcolor = ft.Colors.with_opacity(0.70, "#161822")
+        self.right_panel_barrier.bgcolor = ft.Colors.with_opacity(0.35, ft.Colors.BLACK)
         self.refresh()
 
     def open_settings_dialog(self) -> None:
@@ -3799,101 +3778,30 @@ class ScheduleScreen:
         def _get_tab_content() -> ft.Control:
             idx = active_tab_idx[0]
             if idx == 0:
-                # Вкладка 1: «Интерфейс» (смена темы)
-                is_dark = (self.page.theme_mode != ft.ThemeMode.LIGHT)
-
-                def _on_theme_toggle(e):
-                    new_mode = ft.ThemeMode.DARK if e.control.value else ft.ThemeMode.LIGHT
-                    self.set_theme_mode(new_mode)
-                    _update_dialog_view()
-
-                def _set_dark(_):
-                    self.set_theme_mode(ft.ThemeMode.DARK)
-                    _update_dialog_view()
-
-                def _set_light(_):
-                    self.set_theme_mode(ft.ThemeMode.LIGHT)
-                    _update_dialog_view()
-
-                dark_selected = (self.page.theme_mode != ft.ThemeMode.LIGHT)
-                light_selected = (self.page.theme_mode == ft.ThemeMode.LIGHT)
-
-                dark_card = ft.Container(
-                    expand=True,
-                    padding=16,
-                    border_radius=12,
-                    border=ft.Border.all(2, ft.Colors.PRIMARY if dark_selected else ft.Colors.OUTLINE_VARIANT),
-                    bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if dark_selected else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    ink=True,
-                    on_click=_set_dark,
-                    content=ft.Column(
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
-                        controls=[
-                            ft.Icon(ft.Icons.DARK_MODE_ROUNDED, size=28, color=ft.Colors.PRIMARY if dark_selected else ft.Colors.GREY_400),
-                            ft.Text("Тёмная тема", size=13, weight=ft.FontWeight.BOLD if dark_selected else ft.FontWeight.NORMAL),
-                        ],
-                    ),
-                )
-
-                light_card = ft.Container(
-                    expand=True,
-                    padding=16,
-                    border_radius=12,
-                    border=ft.Border.all(2, ft.Colors.PRIMARY if light_selected else ft.Colors.OUTLINE_VARIANT),
-                    bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if light_selected else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    ink=True,
-                    on_click=_set_light,
-                    content=ft.Column(
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
-                        controls=[
-                            ft.Icon(ft.Icons.LIGHT_MODE_ROUNDED, size=28, color=ft.Colors.PRIMARY if light_selected else ft.Colors.GREY_400),
-                            ft.Text("Светлая тема", size=13, weight=ft.FontWeight.BOLD if light_selected else ft.FontWeight.NORMAL),
-                        ],
-                    ),
-                )
-
-                theme_switch_tile = ft.Container(
-                    padding=ft.Padding(14, 10, 14, 10),
-                    border_radius=10,
-                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    content=ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        controls=[
-                            ft.Row(
-                                spacing=10,
-                                controls=[
-                                    ft.Icon(
-                                        ft.Icons.DARK_MODE_ROUNDED if is_dark else ft.Icons.LIGHT_MODE_ROUNDED,
-                                        color=ft.Colors.PRIMARY,
-                                        size=22,
-                                    ),
-                                    ft.Column(
-                                        spacing=2,
-                                        controls=[
-                                            ft.Text("Тема интерфейса", size=14, weight=ft.FontWeight.W_600),
-                                            ft.Text("Переключение между светлой и темной темой", size=12, color=ft.Colors.GREY_400),
-                                        ],
-                                    ),
-                                ],
-                            ),
-                            ft.Switch(
-                                value=is_dark,
-                                active_color=ft.Colors.PRIMARY,
-                                tooltip="Включить темную тему" if not is_dark else "Включить светлую тему",
-                                on_change=_on_theme_toggle,
-                            ),
-                        ],
-                    ),
-                )
-
+                # Вкладка 1: «Интерфейс» (только тёмная тема)
                 return ft.Column(
                     spacing=14,
                     controls=[
                         ft.Text("Оформление темы", size=15, weight=ft.FontWeight.BOLD),
-                        ft.Row(spacing=12, controls=[dark_card, light_card]),
-                        theme_switch_tile,
+                        ft.Container(
+                            padding=16,
+                            border_radius=12,
+                            border=ft.Border.all(1.5, ft.Colors.PRIMARY),
+                            bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY),
+                            content=ft.Row(
+                                spacing=12,
+                                controls=[
+                                    ft.Icon(ft.Icons.DARK_MODE_ROUNDED, size=28, color=ft.Colors.PRIMARY),
+                                    ft.Column(
+                                        spacing=2,
+                                        controls=[
+                                            ft.Text("Тёмная тема (по умолчанию)", size=14, weight=ft.FontWeight.BOLD),
+                                            ft.Text("Интерфейс приложения работает в тёмном режиме.", size=12, color=ft.Colors.GREY_400),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                        ),
                     ],
                 )
 
