@@ -943,7 +943,7 @@ class ScheduleScreen:
                 self.today_tasks_column.controls.append(self.build_task_card(scored, 0))
 
     def _build_quick_add_bar(self, only_today: bool = False) -> ft.Control:
-        """Build an inline, icon-only quick-add bar for instant task creation."""
+        """Build an inline, icon-only quick-add bar with hover tooltips for compact screens."""
         subjects = self.task_manager.get_all_subjects()
         if not subjects:
             try:
@@ -952,85 +952,124 @@ class ScheduleScreen:
             except Exception:
                 pass
 
-        subject_options = [
-            ft.dropdown.Option(
-                key=str(s.id),
-                text=f"{s.icon or '🏷️'} {s.name}",
-            )
-            for s in subjects
-        ]
+        # Priority mappings
+        PRIORITY_MAP = {
+            TaskPriority.LOW: ("🟢", "Низкий"),
+            TaskPriority.MEDIUM: ("🟡", "Средний"),
+            TaskPriority.HIGH: ("🟠", "Высокий"),
+            TaskPriority.CRITICAL: ("🔴", "Критический"),
+        }
 
-        valid_subject_keys = [opt.key for opt in subject_options]
-        default_subject_key = None
-        if self._last_selected_subject_id and self._last_selected_subject_id in valid_subject_keys:
-            default_subject_key = self._last_selected_subject_id
-        elif subject_options:
-            default_subject_key = subject_options[0].key
+        # 1. Subject / Tag
+        cur_subj = None
+        if self._last_selected_subject_id:
+            cur_subj = next((s for s in subjects if str(s.id) == self._last_selected_subject_id), None)
+        if not cur_subj and subjects:
+            cur_subj = subjects[0]
+            self._last_selected_subject_id = str(cur_subj.id)
 
-        # Title / Name input field: clean placeholder and leading icon
-        name_field = ft.TextField(
-            hint_text="Новая задача...",
-            prefix_icon=ft.Icons.ADD_TASK_ROUNDED,
-            dense=True,
-            text_size=13,
-            expand=True,
-            autofocus=False,
-            on_submit=lambda _: _submit(),
-        )
-        self._quick_add_name_field = name_field
+        tag_icon_text = ft.Text(cur_subj.icon if cur_subj else "🏷️", size=18)
 
-        def _on_subject_change(e: ft.ControlEvent) -> None:
-            self._last_selected_subject_id = subject_dropdown.value
+        def _set_subject(subj: Subject) -> None:
+            self._last_selected_subject_id = str(subj.id)
+            tag_icon_text.value = subj.icon or "🏷️"
+            tag_btn.tooltip = f"Тег: {subj.name} (нажмите для выбора)"
+            self.page.update()
 
-        # Tag dropdown: icon and tag text clearly visible
-        subject_dropdown = ft.Dropdown(
-            options=subject_options,
-            value=default_subject_key,
-            dense=True,
-            text_size=13,
-            width=140,
-            tooltip="Тег / Предмет",
-        )
-        if hasattr(subject_dropdown, "on_select"):
-            subject_dropdown.on_select = _on_subject_change
-        if hasattr(subject_dropdown, "on_change"):
-            subject_dropdown.on_change = _on_subject_change
-
-        # Time input: clock icon and minutes
-        time_field = ft.TextField(
-            value=self._last_expected_minutes or "60",
-            prefix=ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=15, color=ft.Colors.PRIMARY),
-            suffix=ft.Text("м", size=11, color=ft.Colors.GREY_400),
-            input_filter=ft.NumbersOnlyInputFilter(),
-            keyboard_type=ft.KeyboardType.NUMBER,
-            dense=True,
-            text_size=12,
-            width=75,
-            tooltip="Ожидаемое время (в минутах)",
-        )
-
-        def _on_priority_change(e: ft.ControlEvent) -> None:
-            self._last_selected_priority = priority_dropdown.value
-
-        # Priority / Difficulty dropdown: colored icon and rating text clearly visible
-        priority_dropdown = ft.Dropdown(
-            options=[
-                ft.dropdown.Option(key=TaskPriority.LOW.value, text="🟢 Низкий"),
-                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="🟡 Средний"),
-                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="🟠 Высокий"),
-                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="🔴 Критический"),
+        tag_btn = ft.PopupMenuButton(
+            content=ft.Container(
+                content=tag_icon_text,
+                padding=ft.Padding(6, 6, 6, 6),
+                border_radius=8,
+                ink=True,
+            ),
+            tooltip=f"Тег: {cur_subj.name if cur_subj else 'Общее'} (нажмите для выбора)",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Text(s.icon or "🏷️", size=16),
+                            ft.Text(f" {s.name}", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    on_click=lambda _, s=s: _set_subject(s),
+                )
+                for s in subjects
             ],
-            value=self._last_selected_priority or TaskPriority.MEDIUM.value,
-            dense=True,
-            text_size=13,
-            width=135,
-            tooltip="Рейтинг сложности / Приоритет",
         )
-        if hasattr(priority_dropdown, "on_select"):
-            priority_dropdown.on_select = _on_priority_change
-        if hasattr(priority_dropdown, "on_change"):
-            priority_dropdown.on_change = _on_priority_change
 
+        # 2. Time selector
+        cur_mins = int(self._last_expected_minutes or "60")
+
+        def _set_time(mins: int) -> None:
+            self._last_expected_minutes = str(mins)
+            time_btn.tooltip = f"Время: {mins} мин (нажмите для выбора)"
+            self.page.update()
+
+        time_btn = ft.PopupMenuButton(
+            content=ft.Container(
+                content=ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=20, color=ft.Colors.PRIMARY),
+                padding=ft.Padding(6, 6, 6, 6),
+                border_radius=8,
+                ink=True,
+            ),
+            tooltip=f"Время: {cur_mins} мин (нажмите для выбора)",
+            items=[
+                ft.PopupMenuItem(content=ft.Text("⏱️ 15 мин"), on_click=lambda _: _set_time(15)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 30 мин"), on_click=lambda _: _set_time(30)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 45 мин"), on_click=lambda _: _set_time(45)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 60 мин (1 ч)"), on_click=lambda _: _set_time(60)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 90 мин (1.5 ч)"), on_click=lambda _: _set_time(90)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 120 мин (2 ч)"), on_click=lambda _: _set_time(120)),
+                ft.PopupMenuItem(content=ft.Text("⏱️ 180 мин (3 ч)"), on_click=lambda _: _set_time(180)),
+            ],
+        )
+
+        # 3. Priority / Difficulty rating
+        try:
+            cur_p = TaskPriority(self._last_selected_priority or TaskPriority.MEDIUM.value)
+        except ValueError:
+            cur_p = TaskPriority.MEDIUM
+        p_icon, p_name = PRIORITY_MAP.get(cur_p, ("🟡", "Средний"))
+        priority_icon_text = ft.Text(p_icon, size=18)
+
+        def _set_priority(p: TaskPriority) -> None:
+            self._last_selected_priority = p.value
+            p_ic, p_nm = PRIORITY_MAP.get(p, ("🟡", "Средний"))
+            priority_icon_text.value = p_ic
+            priority_btn.tooltip = f"Рейтинг сложности: {p_nm} (нажмите для выбора)"
+            self.page.update()
+
+        priority_btn = ft.PopupMenuButton(
+            content=ft.Container(
+                content=priority_icon_text,
+                padding=ft.Padding(6, 6, 6, 6),
+                border_radius=8,
+                ink=True,
+            ),
+            tooltip=f"Рейтинг сложности: {p_name} (нажмите для выбора)",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text("🟢", size=16), ft.Text(" Низкий", size=13)], spacing=6),
+                    on_click=lambda _: _set_priority(TaskPriority.LOW),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text("🟡", size=16), ft.Text(" Средний", size=13)], spacing=6),
+                    on_click=lambda _: _set_priority(TaskPriority.MEDIUM),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text("🟠", size=16), ft.Text(" Высокий", size=13)], spacing=6),
+                    on_click=lambda _: _set_priority(TaskPriority.HIGH),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text("🔴", size=16), ft.Text(" Критический", size=13)], spacing=6),
+                    on_click=lambda _: _set_priority(TaskPriority.CRITICAL),
+                ),
+            ],
+        )
+
+        # 4. Date Picker and Calendar Button
         date_picker = ft.DatePicker(
             first_date=datetime(2020, 1, 1),
             last_date=datetime(2035, 12, 31),
@@ -1049,34 +1088,48 @@ class ScheduleScreen:
                 self.page.update()
 
         initial_date = date.today() if only_today else (self._last_selected_date or date.today())
-        date_str = "Сегодня" if (only_today or not self._last_selected_date or self._last_selected_date == date.today()) else self._last_selected_date.strftime("%d.%m")
-        date_label = ft.Text(date_str, size=12, weight=ft.FontWeight.W_500)
-        date_btn = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=16, color=ft.Colors.PRIMARY),
-                    date_label,
-                ],
-                spacing=4,
-                tight=True,
-            ),
-            padding=ft.Padding(8, 7, 8, 7),
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE)),
-            border_radius=8,
-            ink=True,
+        d_str = "Сегодня" if initial_date == date.today() else initial_date.strftime("%d.%m.%Y")
+        cal_btn = ft.IconButton(
+            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            icon_color=ft.Colors.PRIMARY,
+            icon_size=20,
+            tooltip=f"Дата: {d_str} (нажмите для выбора)",
             on_click=lambda _: _open_date_picker(),
-            tooltip=f"Запланированная дата: {initial_date.strftime('%d.%m.%Y')} (нажмите для выбора)",
         )
 
         def _on_date_picked(e: ft.ControlEvent) -> None:
             if date_picker.value:
                 d = date_picker.value.date() if hasattr(date_picker.value, "date") else date_picker.value
                 self._last_selected_date = d
-                date_label.value = "Сегодня" if d == date.today() else d.strftime("%d.%m")
-                date_btn.tooltip = f"Запланировано на: {d.strftime('%d.%m.%Y')} (нажмите для изменения)"
+                picked_str = "Сегодня" if d == date.today() else d.strftime("%d.%m.%Y")
+                cal_btn.tooltip = f"Дата: {picked_str} (нажмите для выбора)"
+                cal_btn.icon_color = ft.Colors.CYAN_400
                 self.page.update()
 
         date_picker.on_change = _on_date_picked
+
+        # 5. Task Title Field: takes all remaining width
+        name_field = ft.TextField(
+            hint_text="Новая задача... (Enter для сохранения)",
+            prefix_icon=ft.Icons.ADD_TASK_ROUNDED,
+            dense=True,
+            text_size=13,
+            expand=True,
+            autofocus=False,
+            tooltip="Название задачи (нажмите Enter для сохранения)",
+            on_submit=lambda _: _submit(),
+        )
+        self._quick_add_name_field = name_field
+
+        # 6. Add Task Button
+        add_btn = ft.IconButton(
+            icon=ft.Icons.ADD_ROUNDED,
+            bgcolor=ft.Colors.PRIMARY,
+            icon_color=ft.Colors.WHITE,
+            icon_size=20,
+            tooltip="Добавить задачу (Enter)",
+            on_click=lambda _: _submit(),
+        )
 
         def _submit(e: ft.ControlEvent | None = None) -> None:
             title = (name_field.value or "").strip()
@@ -1088,31 +1141,33 @@ class ScheduleScreen:
             name_field.error_text = None
 
             # Subject
-            subject_id_raw = subject_dropdown.value
-            if not subject_id_raw:
-                _show_snack(self.page, "Сначала выберите или создайте тег!", bgcolor=ft.Colors.AMBER_800)
-                return
-            subject_id = int(subject_id_raw)
-            self._last_selected_subject_id = str(subject_id)
-
-            # Time
-            time_raw = (time_field.value or "").strip()
-            expected_hours = 1.0
-            if time_raw:
+            subject_id = None
+            if self._last_selected_subject_id:
                 try:
-                    mins = float(time_raw)
-                    if mins > 0:
-                        expected_hours = round(mins / 60.0, 4)
-                        self._last_expected_minutes = time_raw
+                    subject_id = int(self._last_selected_subject_id)
                 except ValueError:
                     pass
+            if subject_id is None and subjects:
+                subject_id = subjects[0].id
+
+            if subject_id is None:
+                _show_snack(self.page, "Сначала выберите или создайте тег!", bgcolor=ft.Colors.AMBER_800)
+                return
+
+            # Time
+            time_val = 60.0
+            if self._last_expected_minutes:
+                try:
+                    time_val = float(self._last_expected_minutes)
+                except ValueError:
+                    time_val = 60.0
+            expected_hours = round(time_val / 60.0, 4)
 
             # Priority
             try:
-                priority = TaskPriority(priority_dropdown.value or TaskPriority.MEDIUM.value)
+                priority = TaskPriority(self._last_selected_priority or TaskPriority.MEDIUM.value)
             except ValueError:
                 priority = TaskPriority.MEDIUM
-            self._last_selected_priority = priority.value
 
             # Scheduled Date
             sched_date = self._last_selected_date or (date.today() if only_today else None)
@@ -1143,24 +1198,15 @@ class ScheduleScreen:
             except Exception as err:
                 _show_snack(self.page, f"Ошибка при добавлении задачи: {err}", bgcolor=ft.Colors.RED_800)
 
-        # Add button: icon only (+)
-        add_btn = ft.IconButton(
-            icon=ft.Icons.ADD_ROUNDED,
-            bgcolor=ft.Colors.PRIMARY,
-            icon_color=ft.Colors.WHITE,
-            tooltip="Добавить задачу (Enter)",
-            on_click=lambda _: _submit(),
-        )
-
         row_layout = ft.Row(
-            spacing=6,
+            spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 name_field,
-                subject_dropdown,
-                time_field,
-                priority_dropdown,
-                date_btn,
+                tag_btn,
+                time_btn,
+                priority_btn,
+                cal_btn,
                 add_btn,
             ],
         )
@@ -1168,7 +1214,7 @@ class ScheduleScreen:
         return ft.Card(
             elevation=1,
             content=ft.Container(
-                padding=ft.Padding(left=10, top=6, right=8, bottom=6),
+                padding=ft.Padding(left=8, top=4, right=6, bottom=4),
                 border_radius=10,
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
                 border=ft.Border.all(1, ft.Colors.with_opacity(0.18, ft.Colors.OUTLINE)),
