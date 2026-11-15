@@ -93,16 +93,23 @@ class ScheduleScreen:
         self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
         self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
 
-        # Containers
-        self.today_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
-        self.all_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
-        self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
-        self.archive_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
+        # Containers (ListView provides Flutter viewport virtualization for fast scrolling with many tasks)
+        self.today_tasks_column = ft.ListView(spacing=8, expand=True)
+        self.all_tasks_column = ft.ListView(spacing=8, expand=True)
+        self.tags_column = ft.ListView(spacing=8, expand=True)
+        self.archive_column = ft.ListView(spacing=8, expand=True)
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(
             width=self.DEFAULT_EXPANDED_WIDTH,
             on_click=lambda _: self.close_right_panel() if self.right_panel_open else None,
         )
+
+        # Tab view caching for zero-lag 0ms tab switching
+        self._tab_views: dict[int, ft.Control] = {}
+        self._dirty_tabs: set[int] = {0, 1, 2, 3}
+        self._nav_btn_containers: dict[int, ft.Container] = {}
+        self._task_card_containers: dict[int, ft.Container] = {}
+        self._tag_card_containers: dict[int, ft.Container] = {}
 
         # Quick-add task row state
         self._last_selected_subject_id: str | None = None
@@ -241,11 +248,28 @@ class ScheduleScreen:
             self.close_right_panel()
         if self.current_tab != tab_index:
             self.current_tab = tab_index
-            self._render_sidebar()
+            self._update_sidebar_tab_selection()
             self._render_content()
             self._update_fab()
             self.page.update()
-            gc.collect(1)
+
+    def _update_sidebar_tab_selection(self) -> None:
+        """Fast update of sidebar navigation button highlights without re-querying stats."""
+        if not hasattr(self, "_nav_btn_containers") or not self._nav_btn_containers:
+            self._render_sidebar()
+            return
+        for idx, btn in self._nav_btn_containers.items():
+            is_active = (idx == self.current_tab)
+            btn.bgcolor = (
+                ft.Colors.with_opacity(0.18, ft.Colors.PRIMARY)
+                if is_active
+                else ft.Colors.TRANSPARENT
+            )
+            btn.border = (
+                ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.PRIMARY))
+                if is_active
+                else None
+            )
 
     def _focus_control(self, control: ft.Control | None) -> None:
         """Safely focus a control supporting both synchronous and async Flet versions."""
@@ -575,14 +599,19 @@ class ScheduleScreen:
             )
 
         # Navigation items
+        self._nav_btn_containers.clear()
+        btn_0 = _nav_button("Сегодняшние задачи", ft.Icons.TODAY_ROUNDED, 0, str(today_active))
+        btn_1 = _nav_button("Все задачи", ft.Icons.CHECKLIST_ROUNDED, 1, str(all_active))
+        btn_2 = _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(tags_count))
+        btn_3 = _nav_button("Архив", ft.Icons.INVENTORY_2_ROUNDED, 3, str(archived_count) if archived_count > 0 else None)
+        self._nav_btn_containers[0] = btn_0
+        self._nav_btn_containers[1] = btn_1
+        self._nav_btn_containers[2] = btn_2
+        self._nav_btn_containers[3] = btn_3
+
         nav_items = ft.Column(
             spacing=8,
-            controls=[
-                _nav_button("Сегодняшние задачи", ft.Icons.TODAY_ROUNDED, 0, str(today_active)),
-                _nav_button("Все задачи", ft.Icons.CHECKLIST_ROUNDED, 1, str(all_active)),
-                _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(tags_count)),
-                _nav_button("Архив", ft.Icons.INVENTORY_2_ROUNDED, 3, str(archived_count) if archived_count > 0 else None),
-            ],
+            controls=[btn_0, btn_1, btn_2, btn_3],
         )
 
         # Bottom stats panel
@@ -930,22 +959,25 @@ class ScheduleScreen:
             else None
         )
 
+        card_container = ft.Container(
+            padding=ft.Padding(left=12, top=8, right=10, bottom=8),
+            border_radius=10,
+            border=card_border,
+            ink=True,
+            opacity=0.78 if is_completed else 1.0,
+            tooltip="Нажмите, чтобы открыть описание и параметры задачи",
+            on_click=lambda _, t=task: self.open_right_panel(t),
+            content=ft.Column(
+                spacing=5,
+                tight=True,
+                controls=card_controls,
+            ),
+        )
+        self._task_card_containers[task.id] = card_container
+
         return ft.Card(
             elevation=1 if is_completed else (3 if is_selected else 2),
-            content=ft.Container(
-                padding=ft.Padding(left=12, top=8, right=10, bottom=8),
-                border_radius=10,
-                border=card_border,
-                ink=True,
-                opacity=0.78 if is_completed else 1.0,
-                tooltip="Нажмите, чтобы открыть описание и параметры задачи",
-                on_click=lambda _, t=task: self.open_right_panel(t),
-                content=ft.Column(
-                    spacing=5,
-                    tight=True,
-                    controls=card_controls,
-                ),
-            ),
+            content=card_container,
         )
 
     # ──────────────────────────────────────────
@@ -1810,28 +1842,31 @@ class ScheduleScreen:
             else None
         )
 
+        tag_card_container = ft.Container(
+            padding=ft.Padding(left=10, top=6, right=8, bottom=6),
+            border_radius=10,
+            border=card_border,
+            ink=True,
+            tooltip="Нажмите, чтобы открыть и редактировать параметры тега",
+            on_click=lambda _, t=tag: self.open_right_tag_panel(t),
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    icon_box,
+                    name_text,
+                    color_chip,
+                    count_chip,
+                    edit_btn,
+                    delete_btn,
+                ],
+            ),
+        )
+        self._tag_card_containers[tag.id] = tag_card_container
+
         return ft.Card(
             elevation=1 if not is_selected else 2,
-            content=ft.Container(
-                padding=ft.Padding(left=10, top=6, right=8, bottom=6),
-                border_radius=10,
-                border=card_border,
-                ink=True,
-                tooltip="Нажмите, чтобы открыть и редактировать параметры тега",
-                on_click=lambda _, t=tag: self.open_right_tag_panel(t),
-                content=ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        icon_box,
-                        name_text,
-                        color_chip,
-                        count_chip,
-                        edit_btn,
-                        delete_btn,
-                    ],
-                ),
-            ),
+            content=tag_card_container,
         )
 
     def load_tags(self) -> None:
@@ -2263,22 +2298,25 @@ class ScheduleScreen:
             else None
         )
 
+        card_container = ft.Container(
+            padding=ft.Padding(left=12, top=8, right=10, bottom=8),
+            border_radius=10,
+            border=card_border,
+            ink=True,
+            opacity=0.88,
+            tooltip="Нажмите, чтобы открыть описание и параметры задачи",
+            on_click=lambda _, t=task: self.open_right_panel(t),
+            content=ft.Column(
+                spacing=5,
+                tight=True,
+                controls=card_controls,
+            ),
+        )
+        self._task_card_containers[task.id] = card_container
+
         return ft.Card(
             elevation=1 if not is_selected else 2,
-            content=ft.Container(
-                padding=ft.Padding(left=12, top=8, right=10, bottom=8),
-                border_radius=10,
-                border=card_border,
-                ink=True,
-                opacity=0.88,
-                tooltip="Нажмите, чтобы открыть описание и параметры задачи",
-                on_click=lambda _, t=task: self.open_right_panel(t),
-                content=ft.Column(
-                    spacing=5,
-                    tight=True,
-                    controls=card_controls,
-                ),
-            ),
+            content=card_container,
         )
 
     def load_archived_tasks(self) -> int:
@@ -3047,6 +3085,7 @@ class ScheduleScreen:
 
     def open_right_tag_panel(self, tag: Subject) -> None:
         """Open the translucent right panel for editing a tag."""
+        prev_id = self.selected_tag_id
         self.right_panel_mode = "tag"
         self.selected_tag_id = tag.id
         self.selected_task_id = None
@@ -3056,11 +3095,17 @@ class ScheduleScreen:
         self._render_right_tag_panel_content(tag)
         self.right_panel_barrier.visible = True
         self.right_panel_container.visible = True
-        self._render_content()
+
+        if prev_id and prev_id in self._tag_card_containers:
+            self._tag_card_containers[prev_id].border = None
+        if tag.id in self._tag_card_containers:
+            self._tag_card_containers[tag.id].border = ft.Border.all(1.5, ft.Colors.CYAN_400)
+
         self.page.update()
 
     def open_right_panel(self, task: Task) -> None:
         """Open the translucent right panel with editable task description and properties."""
+        prev_id = self.selected_task_id
         self.right_panel_mode = "task"
         self.selected_task_id = task.id
         self.selected_tag_id = None
@@ -3070,17 +3115,25 @@ class ScheduleScreen:
         self._render_right_panel_content(task)
         self.right_panel_barrier.visible = True
         self.right_panel_container.visible = True
-        self._render_content()
+
+        if prev_id and prev_id in self._task_card_containers:
+            self._task_card_containers[prev_id].border = None
+        if task.id in self._task_card_containers:
+            self._task_card_containers[task.id].border = ft.Border.all(1.5, ft.Colors.CYAN_400)
+
         self.page.update()
 
     def close_right_panel(self) -> None:
         """Close the right overlay panel."""
         self.right_panel_open = False
+        if self.selected_task_id and self.selected_task_id in self._task_card_containers:
+            self._task_card_containers[self.selected_task_id].border = None
+        if self.selected_tag_id and self.selected_tag_id in self._tag_card_containers:
+            self._tag_card_containers[self.selected_tag_id].border = None
         self.selected_task_id = None
         self.selected_tag_id = None
         self.right_panel_barrier.visible = False
         self.right_panel_container.visible = False
-        self._render_content()
         self.page.update()
 
     def toggle_right_panel(self, task: Task | None = None, tag: Subject | None = None) -> None:
@@ -3128,16 +3181,26 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     # Rendering & View Updates
     # ──────────────────────────────────────────
+    def _get_or_build_tab_view(self, tab_idx: int) -> ft.Control:
+        """Return the pre-rendered tab view or build it if dirty/missing."""
+        if tab_idx in self._dirty_tabs or tab_idx not in self._tab_views:
+            if tab_idx == 0:
+                view = self._render_today_tasks_view()
+            elif tab_idx == 1:
+                view = self._render_all_tasks_view()
+            elif tab_idx == 2:
+                view = self._render_tags_view()
+            else:
+                view = self._render_archive_view()
+
+            self._tab_views[tab_idx] = view
+            self._dirty_tabs.discard(tab_idx)
+
+        return self._tab_views[tab_idx]
+
     def _render_content(self) -> None:
-        """Render the main content view based on current tab."""
-        if self.current_tab == 0:
-            self.content_area.content = self._render_today_tasks_view()
-        elif self.current_tab == 1:
-            self.content_area.content = self._render_all_tasks_view()
-        elif self.current_tab == 2:
-            self.content_area.content = self._render_tags_view()
-        else:
-            self.content_area.content = self._render_archive_view()
+        """Render the main content view using cached tab views when clean, or build when dirty."""
+        self.content_area.content = self._get_or_build_tab_view(self.current_tab)
 
     def _handle_page_resize(self, e: ft.ControlEvent | None = None) -> None:
         """Handle screen resizing adaptively for various screen dimensions."""
@@ -3198,6 +3261,10 @@ class ScheduleScreen:
 
     def refresh(self) -> None:
         """Reload data for the active view, update sidebar and page."""
+        self._dirty_tabs = {0, 1, 2, 3}
+        self._task_card_containers.clear()
+        self._tag_card_containers.clear()
+        TimePredictor.clear_cache()
         self._render_sidebar()
         self._render_content()
         self.page.update()
