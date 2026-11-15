@@ -91,6 +91,21 @@ class ScheduleScreen:
         # Resizer handle between sidebar and content
         self.resizer_handle = self._build_resizer_handle()
 
+        # Right overlay panel state (opens on top of tasks without shifting them)
+        self.right_panel_open: bool = False
+        self.selected_task_id: int | None = None
+        self.right_panel_width: int = 400
+        self.right_panel_container: ft.Container = self._build_right_panel_container()
+
+        # Stack wrapping content_area and overlay right panel
+        self.main_content_stack: ft.Stack = ft.Stack(
+            expand=True,
+            controls=[
+                self.content_area,
+                self.right_panel_container,
+            ],
+        )
+
     # ──────────────────────────────────────────
     # Priority & Formatting Helpers
     # ──────────────────────────────────────────
@@ -842,24 +857,56 @@ class ScheduleScreen:
 
         if task.description:
             card_controls.append(
-                ft.Text(
-                    task.description,
-                    size=12,
-                    color=ft.Colors.GREY_500 if is_completed else ft.Colors.GREY_400,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
+                ft.Container(
+                    padding=ft.Padding(left=2, top=2, right=2, bottom=2),
+                    content=ft.Row(
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        controls=[
+                            ft.Icon(ft.Icons.NOTES_ROUNDED, size=14, color=ft.Colors.CYAN_300 if not is_completed else ft.Colors.GREY_500),
+                            ft.Text(
+                                task.description,
+                                size=12,
+                                color=ft.Colors.GREY_300 if not is_completed else ft.Colors.GREY_500,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True,
+                            ),
+                        ],
+                    ),
+                )
+            )
+        else:
+            card_controls.append(
+                ft.Container(
+                    padding=ft.Padding(left=2, top=1, right=2, bottom=1),
+                    content=ft.Row(
+                        spacing=4,
+                        controls=[
+                            ft.Icon(ft.Icons.ADD_COMMENT_OUTLINED, size=12, color=ft.Colors.GREY_500),
+                            ft.Text("Добавить описание...", size=11, color=ft.Colors.GREY_500),
+                        ],
+                    ),
                 )
             )
 
+        is_selected = (self.selected_task_id == task.id and self.right_panel_open)
+        card_border = (
+            ft.Border.all(1.5, ft.Colors.CYAN_400)
+            if is_selected
+            else None
+        )
+
         return ft.Card(
-            elevation=1 if is_completed else 2,
+            elevation=1 if is_completed else (3 if is_selected else 2),
             content=ft.Container(
                 padding=ft.Padding(left=12, top=8, right=10, bottom=8),
                 border_radius=10,
+                border=card_border,
                 ink=True,
                 opacity=0.78 if is_completed else 1.0,
-                tooltip="Нажмите на карточку, чтобы изменить задачу",
-                on_click=lambda _, t=task: self.open_edit_dialog(t),
+                tooltip="Нажмите, чтобы открыть описание и параметры задачи",
+                on_click=lambda _, t=task: self.open_right_panel(t),
                 content=ft.Column(
                     spacing=5,
                     tight=True,
@@ -1406,7 +1453,7 @@ class ScheduleScreen:
         today_done = len([s for s in today_tasks if s.task.status == TaskStatus.COMPLETED])
 
         header_actions = ft.Row(
-            spacing=8,
+            spacing=6,
             wrap=True,
             controls=[
                 ft.OutlinedButton(
@@ -1416,6 +1463,12 @@ class ScheduleScreen:
                         color=ft.Colors.GREEN_400,
                     ) if hasattr(ft, "ButtonStyle") else None,
                     on_click=lambda _: self.confirm_complete_all(only_today=True),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.VIEW_SIDEBAR_ROUNDED,
+                    tooltip="Панель описания задачи",
+                    icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
+                    on_click=lambda _: self.toggle_right_panel(),
                 ),
             ],
         )
@@ -1550,7 +1603,7 @@ class ScheduleScreen:
         all_done_today = len([s for s in all_tasks_scored if s.task.status == TaskStatus.COMPLETED])
 
         header_actions = ft.Row(
-            spacing=8,
+            spacing=6,
             wrap=True,
             controls=[
                 ft.OutlinedButton(
@@ -1560,6 +1613,12 @@ class ScheduleScreen:
                         color=ft.Colors.GREEN_400,
                     ) if hasattr(ft, "ButtonStyle") else None,
                     on_click=lambda _: self.confirm_complete_all(only_today=False),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.VIEW_SIDEBAR_ROUNDED,
+                    tooltip="Панель описания задачи",
+                    icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
+                    on_click=lambda _: self.toggle_right_panel(),
                 ),
             ],
         )
@@ -1978,22 +2037,43 @@ class ScheduleScreen:
         card_controls: list[ft.Control] = [header_row, meta_row]
         if task.description:
             card_controls.append(
-                ft.Text(
-                    task.description,
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
+                ft.Container(
+                    padding=ft.Padding(left=2, top=2, right=2, bottom=2),
+                    content=ft.Row(
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        controls=[
+                            ft.Icon(ft.Icons.NOTES_ROUNDED, size=14, color=ft.Colors.GREY_500),
+                            ft.Text(
+                                task.description,
+                                size=12,
+                                color=ft.Colors.GREY_500,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True,
+                            ),
+                        ],
+                    ),
                 )
             )
 
+        is_selected = (self.selected_task_id == task.id and self.right_panel_open)
+        card_border = (
+            ft.Border.all(1.5, ft.Colors.CYAN_400)
+            if is_selected
+            else None
+        )
+
         return ft.Card(
-            elevation=1,
+            elevation=1 if not is_selected else 2,
             content=ft.Container(
                 padding=ft.Padding(left=12, top=8, right=10, bottom=8),
                 border_radius=10,
+                border=card_border,
                 ink=True,
                 opacity=0.88,
+                tooltip="Нажмите, чтобы открыть описание и параметры задачи",
+                on_click=lambda _, t=task: self.open_right_panel(t),
                 content=ft.Column(
                     spacing=5,
                     tight=True,
@@ -2061,6 +2141,14 @@ class ScheduleScreen:
                     on_click=lambda _: self.confirm_clear_archive(),
                 )
             )
+        header_actions.append(
+            ft.IconButton(
+                icon=ft.Icons.VIEW_SIDEBAR_ROUNDED,
+                tooltip="Панель описания задачи",
+                icon_color=ft.Colors.CYAN_300 if self.right_panel_open else ft.Colors.GREY_400,
+                on_click=lambda _: self.toggle_right_panel(),
+            )
+        )
 
         header = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -2106,6 +2194,375 @@ class ScheduleScreen:
         )
 
     # ──────────────────────────────────────────
+    # Right Overlay Panel (Task Description & Details)
+    # ──────────────────────────────────────────
+    def _build_right_panel_container(self) -> ft.Container:
+        """Create the semi-transparent overlay right panel container with blur effect."""
+        return ft.Container(
+            right=0,
+            top=0,
+            bottom=0,
+            width=self.right_panel_width,
+            visible=False,
+            bgcolor=ft.Colors.with_opacity(0.88, "#181A20"),
+            blur=ft.Blur(16, 16, ft.BlurTileMode.CLAMP),
+            border=ft.Border(
+                left=ft.BorderSide(1.5, ft.Colors.with_opacity(0.35, ft.Colors.OUTLINE)),
+            ),
+            shadow=ft.BoxShadow(
+                spread_radius=2,
+                blur_radius=28,
+                color=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                offset=ft.Offset(-6, 0),
+            ),
+            border_radius=ft.BorderRadius(top_left=16, bottom_left=16, top_right=0, bottom_right=0),
+            padding=ft.Padding(left=18, top=16, right=18, bottom=16),
+            content=ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=14),
+        )
+
+    def _render_right_panel_content(self, task: Task | None = None) -> None:
+        """Populate the right overlay panel with editable description and properties."""
+        col = self.right_panel_container.content
+        if not isinstance(col, ft.Column):
+            col = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=14)
+            self.right_panel_container.content = col
+        col.controls.clear()
+
+        if task is None and self.selected_task_id:
+            task = self.task_manager.get_task_by_id(self.selected_task_id)
+
+        if task is None:
+            col.controls.extend([
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Text("Описание задачи", size=16, weight=ft.FontWeight.BOLD),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE_ROUNDED,
+                            tooltip="Закрыть панель",
+                            icon_size=20,
+                            on_click=lambda _: self.close_right_panel(),
+                        ),
+                    ],
+                ),
+                ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                ft.Container(
+                    padding=40,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=12,
+                        controls=[
+                            ft.Icon(ft.Icons.TOUCH_APP_ROUNDED, size=40, color=ft.Colors.GREY_500),
+                            ft.Text("Задача не выбрана", size=15, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "Нажмите на любую задачу в списке, чтобы открыть и редактировать её описание.",
+                                size=13,
+                                color=ft.Colors.GREY_400,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                    ),
+                ),
+            ])
+            return
+
+        # ── Header ──────────────────────────────────────
+        header = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                ft.Row(
+                    spacing=8,
+                    controls=[
+                        ft.Icon(ft.Icons.DESCRIPTION_ROUNDED, color=ft.Colors.PRIMARY, size=22),
+                        ft.Text("Карточка задачи", size=16, weight=ft.FontWeight.BOLD),
+                    ],
+                ),
+                ft.Row(
+                    spacing=0,
+                    controls=[
+                        ft.IconButton(
+                            icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                            tooltip="Открыть в модальном окне",
+                            icon_size=18,
+                            icon_color=ft.Colors.GREY_400,
+                            on_click=lambda _, t=task: self.open_edit_dialog(t),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE_ROUNDED,
+                            tooltip="Закрыть панель (Esc)",
+                            icon_size=20,
+                            icon_color=ft.Colors.GREY_300,
+                            on_click=lambda _: self.close_right_panel(),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        # ── Title field ─────────────────────────────────
+        title_field = ft.TextField(
+            label="Название задачи",
+            value=task.name,
+            dense=True,
+            text_size=13,
+        )
+
+        # ── Description field (editable multiline) ───────
+        desc_field = ft.TextField(
+            label="Описание и заметки",
+            value=task.description or "",
+            multiline=True,
+            min_lines=6,
+            max_lines=14,
+            hint_text="Добавьте подробное описание задачи, ссылки, подпункты или заметки...",
+            text_size=13,
+            dense=True,
+        )
+
+        # ── Tag selector ─────────────────────────────────
+        subjects = self.task_manager.get_all_subjects()
+        subject_options = [
+            ft.dropdown.Option(key=str(s.id), text=f"{s.icon or '🏷️'} {s.name}")
+            for s in subjects
+        ]
+        subj_dropdown = ft.Dropdown(
+            label="Тег / Предмет",
+            options=subject_options,
+            value=str(task.subject_id),
+            dense=True,
+            text_size=13,
+        )
+
+        # ── Priority selector ────────────────────────────
+        priority_dropdown = ft.Dropdown(
+            label="Сложность / Приоритет",
+            options=[
+                ft.dropdown.Option(key=TaskPriority.LOW.value, text="🟢 Низкий"),
+                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="🟡 Средний"),
+                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="🟠 Высокий"),
+                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="🔴 Критический"),
+            ],
+            value=task.priority.value,
+            dense=True,
+            text_size=13,
+        )
+
+        # ── Expected Time ────────────────────────────────
+        cur_mins = round(task.expected_time * 60) if task.expected_time else 60
+        time_field = ft.TextField(
+            label="Ожидаемое время",
+            value=str(cur_mins),
+            suffix=ft.Text("мин"),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            input_filter=ft.NumbersOnlyInputFilter(),
+            dense=True,
+            text_size=13,
+        )
+
+        # ── Scheduled Date Button ────────────────────────
+        sched_state = {"date": task.scheduled_date}
+        sched_dp = ft.DatePicker(
+            first_date=datetime(2020, 1, 1),
+            last_date=datetime(2035, 12, 31),
+            value=datetime.combine(task.scheduled_date, datetime.min.time()) if task.scheduled_date else datetime.now(),
+        )
+
+        def _on_sched_picked(e: ft.ControlEvent) -> None:
+            if sched_dp.value:
+                d = sched_dp.value.date() if hasattr(sched_dp.value, "date") else sched_dp.value
+                sched_state["date"] = d
+                sched_str = "Сегодня" if d == date.today() else d.strftime("%d.%m.%Y")
+                sched_btn.content = f"План: {sched_str}"
+                self.page.update()
+
+        sched_dp.on_change = _on_sched_picked
+
+        def _open_sched_dp(_) -> None:
+            if hasattr(self.page, "show_dialog"):
+                self.page.show_dialog(sched_dp)
+            elif hasattr(self.page, "open"):
+                self.page.open(sched_dp)
+            else:
+                if sched_dp not in self.page.overlay:
+                    self.page.overlay.append(sched_dp)
+                sched_dp.open = True
+                self.page.update()
+
+        cur_sched_text = (
+            "Сегодня" if task.scheduled_date == date.today()
+            else (task.scheduled_date.strftime("%d.%m.%Y") if task.scheduled_date else "Не запланировано")
+        )
+        sched_btn = ft.OutlinedButton(
+            f"План: {cur_sched_text}",
+            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+            on_click=_open_sched_dp,
+        )
+
+        # ── AI info ──────────────────────────────────────
+        ai_chip = None
+        if task.expected_time is not None:
+            try:
+                pred = TimePredictor().predict_time(task.subject_id, task.expected_time)
+                if not pred.cold_start:
+                    ai_mins = round(pred.predicted_time * 60, 1)
+                    ai_chip = ft.Container(
+                        padding=ft.Padding(8, 6, 8, 6),
+                        border_radius=8,
+                        bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.AMBER_400),
+                        content=ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=15, color=ft.Colors.AMBER_400),
+                                ft.Text(f"ИИ прогноз: ~{int(ai_mins) if ai_mins.is_integer() else ai_mins} мин", size=12, color=ft.Colors.AMBER_300),
+                            ],
+                        ),
+                    )
+            except Exception:
+                pass
+
+        # ── Save callback ─────────────────────────────────
+        def _save_changes(e: ft.ControlEvent | None = None) -> None:
+            name_val = (title_field.value or "").strip()
+            if not name_val:
+                title_field.error_text = "Название не может быть пустым"
+                self.page.update()
+                return
+            title_field.error_text = None
+
+            try:
+                s_id = int(subj_dropdown.value) if (subj_dropdown.value and subj_dropdown.value != "None") else task.subject_id
+            except (ValueError, TypeError):
+                s_id = task.subject_id
+
+            try:
+                p_val = TaskPriority(priority_dropdown.value) if priority_dropdown.value else task.priority
+            except (ValueError, TypeError):
+                p_val = task.priority
+            try:
+                t_mins = float(time_field.value or "60")
+                exp_h = round(t_mins / 60.0, 4)
+            except ValueError:
+                exp_h = task.expected_time
+
+            updated_task = self.task_manager.update_task(
+                task_id=task.id,
+                name=name_val,
+                subject_id=s_id,
+                description=desc_field.value,
+                priority=p_val,
+                expected_time=exp_h,
+                scheduled_date=sched_state["date"],
+            )
+            _show_snack(self.page, f"Описание и данные задачи «{name_val}» сохранены!", bgcolor=ft.Colors.GREEN_800)
+            self.refresh()
+            self._render_right_panel_content(updated_task)
+            self.page.update()
+
+        # ── Action buttons row ────────────────────────────
+        save_btn = FilledBtn(
+            "Сохранить описание",
+            icon=ft.Icons.SAVE_ROUNDED,
+            on_click=_save_changes,
+        )
+
+        status_btn = None
+        if task.status != TaskStatus.COMPLETED:
+            status_btn = ft.OutlinedButton(
+                "Завершить",
+                icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                style=ft.ButtonStyle(color=ft.Colors.GREEN_400) if hasattr(ft, "ButtonStyle") else None,
+                on_click=lambda _, tid=task.id, tname=task.name, et=task.expected_time: self.open_complete_dialog(tid, tname, et),
+            )
+        else:
+            status_btn = ft.OutlinedButton(
+                "В архив",
+                icon=ft.Icons.ARCHIVE_ROUNDED,
+                style=ft.ButtonStyle(color=ft.Colors.CYAN_300) if hasattr(ft, "ButtonStyle") else None,
+                on_click=lambda _, tid=task.id, tname=task.name: self.archive_task(tid, tname),
+            )
+
+        delete_btn = ft.IconButton(
+            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+            icon_color=ft.Colors.RED_400,
+            tooltip="Удалить задачу",
+            on_click=lambda _, tid=task.id, tname=task.name: self.confirm_delete_archived_task(tid, tname),
+        )
+
+        actions_row = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                save_btn,
+                ft.Row(spacing=4, controls=[status_btn, delete_btn] if status_btn else [delete_btn]),
+            ],
+        )
+
+        col_controls: list[ft.Control] = [
+            header,
+            ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+            title_field,
+            desc_field,
+            ft.Text("Свойства задачи", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
+            subj_dropdown,
+            priority_dropdown,
+            time_field,
+            sched_btn,
+        ]
+        if ai_chip:
+            col_controls.append(ai_chip)
+        col_controls.extend([
+            ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+            actions_row,
+        ])
+
+        col.controls = col_controls
+
+    def open_right_panel(self, task: Task) -> None:
+        """Open the translucent right panel with editable task description and properties."""
+        self.selected_task_id = task.id
+        self.right_panel_open = True
+        w = getattr(self.page, "width", 1000) or 1000
+        self.right_panel_container.width = min(420, max(300, w - 60))
+        self._render_right_panel_content(task)
+        self.right_panel_container.visible = True
+        self._render_content()
+        self.page.update()
+
+    def close_right_panel(self) -> None:
+        """Close the right overlay panel."""
+        self.right_panel_open = False
+        self.selected_task_id = None
+        self.right_panel_container.visible = False
+        self._render_content()
+        self.page.update()
+
+    def toggle_right_panel(self, task: Task | None = None) -> None:
+        """Toggle right panel visibility."""
+        if self.right_panel_open:
+            self.close_right_panel()
+        else:
+            if task:
+                self.open_right_panel(task)
+                return
+            if self.selected_task_id:
+                t = self.task_manager.get_task_by_id(self.selected_task_id)
+                if t:
+                    self.open_right_panel(t)
+                    return
+            today_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
+            if today_tasks:
+                self.open_right_panel(today_tasks[0].task)
+            else:
+                all_tasks = self.task_manager.get_all_tasks()
+                if all_tasks:
+                    self.open_right_panel(all_tasks[0])
+                else:
+                    self.right_panel_open = True
+                    self.right_panel_container.visible = True
+                    self._render_right_panel_content(None)
+                    self.page.update()
+
+    # ──────────────────────────────────────────
     # Rendering & View Updates
     # ──────────────────────────────────────────
     def _render_content(self) -> None:
@@ -2129,6 +2586,10 @@ class ScheduleScreen:
             self.page.padding = 10
         else:
             self.page.padding = 14
+
+        # Adaptive width for overlay right panel
+        if hasattr(self, "right_panel_container") and self.right_panel_container:
+            self.right_panel_container.width = min(420, max(280, width - 40))
 
         # Auto-collapse sidebar on narrow screens (< 768px)
         if width < 768 and not self.sidebar_collapsed:
@@ -2165,7 +2626,7 @@ class ScheduleScreen:
                     self.sidebar_area,
                     self.resizer_handle,
                     ft.Container(width=10),
-                    self.content_area,
+                    self.main_content_stack,
                 ],
             )
         )
