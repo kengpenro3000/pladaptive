@@ -955,15 +955,7 @@ class ScheduleScreen:
         subject_options = [
             ft.dropdown.Option(
                 key=str(s.id),
-                text=s.icon or "🏷️",
-                content=ft.Row(
-                    [
-                        ft.Text(s.icon or "🏷️", size=14),
-                        ft.Text(f" {s.name}", size=12),
-                    ],
-                    spacing=4,
-                ),
-                tooltip=s.name,
+                text=f"{s.icon or '🏷️'} {s.name}",
             )
             for s in subjects
         ]
@@ -990,13 +982,13 @@ class ScheduleScreen:
         def _on_subject_change(e: ft.ControlEvent) -> None:
             self._last_selected_subject_id = subject_dropdown.value
 
-        # Tag dropdown: only icon shown in field
+        # Tag dropdown: icon and tag text clearly visible
         subject_dropdown = ft.Dropdown(
             options=subject_options,
             value=default_subject_key,
             dense=True,
             text_size=13,
-            width=62,
+            width=140,
             tooltip="Тег / Предмет",
         )
         if hasattr(subject_dropdown, "on_select"):
@@ -1004,34 +996,35 @@ class ScheduleScreen:
         if hasattr(subject_dropdown, "on_change"):
             subject_dropdown.on_change = _on_subject_change
 
-        # Time input: only clock icon and minutes number (no text "мин")
+        # Time input: clock icon and minutes
         time_field = ft.TextField(
             value=self._last_expected_minutes or "60",
-            prefix=ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=15, color=ft.Colors.GREY_300),
+            prefix=ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=15, color=ft.Colors.PRIMARY),
+            suffix=ft.Text("м", size=11, color=ft.Colors.GREY_400),
             input_filter=ft.NumbersOnlyInputFilter(),
             keyboard_type=ft.KeyboardType.NUMBER,
             dense=True,
             text_size=12,
-            width=68,
-            tooltip="Ожидаемое время (минут)",
+            width=75,
+            tooltip="Ожидаемое время (в минутах)",
         )
 
         def _on_priority_change(e: ft.ControlEvent) -> None:
             self._last_selected_priority = priority_dropdown.value
 
-        # Priority dropdown: only icon circles (no text labels)
+        # Priority / Difficulty dropdown: colored icon and rating text clearly visible
         priority_dropdown = ft.Dropdown(
             options=[
-                ft.dropdown.Option(key=TaskPriority.LOW.value, text="🟢", tooltip="Низкий"),
-                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="🟡", tooltip="Средний"),
-                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="🟠", tooltip="Высокий"),
-                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="🔴", tooltip="Критический"),
+                ft.dropdown.Option(key=TaskPriority.LOW.value, text="🟢 Низкий"),
+                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="🟡 Средний"),
+                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="🟠 Высокий"),
+                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="🔴 Критический"),
             ],
             value=self._last_selected_priority or TaskPriority.MEDIUM.value,
             dense=True,
             text_size=13,
-            width=62,
-            tooltip="Приоритет: 🟢, 🟡, 🟠, 🔴",
+            width=135,
+            tooltip="Рейтинг сложности / Приоритет",
         )
         if hasattr(priority_dropdown, "on_select"):
             priority_dropdown.on_select = _on_priority_change
@@ -1056,19 +1049,31 @@ class ScheduleScreen:
                 self.page.update()
 
         initial_date = date.today() if only_today else (self._last_selected_date or date.today())
-        cal_btn = ft.IconButton(
-            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
-            icon_color=ft.Colors.PRIMARY,
-            tooltip=f"Дата: {initial_date.strftime('%d.%m.%Y')} (нажмите для выбора)",
+        date_str = "Сегодня" if (only_today or not self._last_selected_date or self._last_selected_date == date.today()) else self._last_selected_date.strftime("%d.%m")
+        date_label = ft.Text(date_str, size=12, weight=ft.FontWeight.W_500)
+        date_btn = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=16, color=ft.Colors.PRIMARY),
+                    date_label,
+                ],
+                spacing=4,
+                tight=True,
+            ),
+            padding=ft.Padding(8, 7, 8, 7),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE)),
+            border_radius=8,
+            ink=True,
             on_click=lambda _: _open_date_picker(),
+            tooltip=f"Запланированная дата: {initial_date.strftime('%d.%m.%Y')} (нажмите для выбора)",
         )
 
         def _on_date_picked(e: ft.ControlEvent) -> None:
             if date_picker.value:
                 d = date_picker.value.date() if hasattr(date_picker.value, "date") else date_picker.value
                 self._last_selected_date = d
-                cal_btn.tooltip = f"Дата: {d.strftime('%d.%m.%Y')} (нажмите для выбора)"
-                cal_btn.icon_color = ft.Colors.CYAN_400
+                date_label.value = "Сегодня" if d == date.today() else d.strftime("%d.%m")
+                date_btn.tooltip = f"Запланировано на: {d.strftime('%d.%m.%Y')} (нажмите для изменения)"
                 self.page.update()
 
         date_picker.on_change = _on_date_picked
@@ -1155,7 +1160,7 @@ class ScheduleScreen:
                 subject_dropdown,
                 time_field,
                 priority_dropdown,
-                cal_btn,
+                date_btn,
                 add_btn,
             ],
         )
