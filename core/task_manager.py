@@ -181,6 +181,75 @@ class TaskManager:
         with self._session() as session:
             return session.get(Task, task_id)
 
+    def update_task(
+        self,
+        task_id: int,
+        *,
+        name: str | None = None,
+        subject_id: int | None = None,
+        description: str | None = None,
+        priority: TaskPriority | None = None,
+        expected_time: float | None = None,
+        deadline: datetime | None = None,
+    ) -> Task:
+        """Update fields of an existing task and refresh AI prediction.
+
+        Returns the updated :class:`Task`.
+
+        Raises:
+            ValueError: if task or subject does not exist.
+        """
+        with self._session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise ValueError(f"Task with id={task_id} not found.")
+
+            if subject_id is not None:
+                subject = session.get(Subject, subject_id)
+                if subject is None:
+                    raise ValueError(f"Subject with id={subject_id} not found.")
+                task.subject_id = subject_id
+
+            if name is not None:
+                task.name = name
+            if description is not None:
+                task.description = description
+            if priority is not None:
+                task.priority = priority
+            if expected_time is not None:
+                task.expected_time = expected_time
+            if deadline is not None:
+                task.deadline = deadline
+
+            session.flush()
+
+        # Update prediction if expected_time is available
+        if task.expected_time is not None:
+            predictor = TimePredictor()
+            prediction = predictor.predict_time(task.subject_id, task.expected_time)
+
+            expected_min = prediction.expected_time * 60
+            predicted_min = prediction.predicted_time * 60
+
+            def _fmt(val: float) -> str:
+                r = round(val, 1)
+                return str(int(r)) if r.is_integer() else f"{r:.1f}"
+
+            msg = (
+                f"Задача обновлена. Ожидаемое время: {_fmt(expected_min)} мин. "
+                f"С учетом вашей истории, предсказанное время: {_fmt(predicted_min)} мин."
+            )
+            print(msg)
+            task.prediction = prediction
+            task.prediction_message = msg
+        else:
+            msg = "Задача обновлена."
+            print(msg)
+            task.prediction = None
+            task.prediction_message = msg
+
+        return task
+
     # ──────────────────────────────────────────
     # Task status transitions
     # ──────────────────────────────────────────

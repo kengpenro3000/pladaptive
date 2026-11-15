@@ -326,6 +326,260 @@ def open_task_create_dialog(
     return form
 
 
+class TaskEditDialog:
+    """Modal dialog for editing an existing task, styled identically to TaskCreateDialog."""
+
+    def __init__(
+        self,
+        page: ft.Page,
+        task: Task,
+        task_manager: TaskManager | None = None,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        self.page = page
+        self.task = task
+        self.task_manager = task_manager or TaskManager()
+        self.on_success = on_success
+
+        # ── Form Inputs (Pre-filled with task data) ──
+        self.name_field = ft.TextField(
+            label="Название задачи*",
+            value=task.name,
+            hint_text="Например: Решить домашку по матанализу",
+            autofocus=True,
+        )
+
+        subjects = self.task_manager.get_all_subjects()
+        subject_options = [
+            ft.dropdown.Option(key=str(s.id), text=s.name)
+            for s in subjects
+        ]
+        self.subject_dropdown = ft.Dropdown(
+            label="Предмет*",
+            hint_text="Выберите предмет",
+            options=subject_options,
+            value=str(task.subject_id),
+        )
+
+        initial_minutes = ""
+        if task.expected_time is not None:
+            r = round(task.expected_time * 60, 1)
+            initial_minutes = str(int(r)) if r.is_integer() else f"{r:.1f}"
+
+        self.time_field = ft.TextField(
+            label="Ожидаемое время (в минутах)*",
+            value=initial_minutes,
+            hint_text="Например: 90",
+            input_filter=ft.NumbersOnlyInputFilter(),
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
+        self.priority_dropdown = ft.Dropdown(
+            label="Приоритет*",
+            value=task.priority.value,
+            options=[
+                ft.dropdown.Option(key=TaskPriority.LOW.value, text="Низкий (Low)"),
+                ft.dropdown.Option(key=TaskPriority.MEDIUM.value, text="Средний (Medium)"),
+                ft.dropdown.Option(key=TaskPriority.HIGH.value, text="Высокий (High)"),
+                ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="Критический (Critical)"),
+            ],
+        )
+
+        initial_deadline = task.deadline.strftime("%Y-%m-%d") if task.deadline else ""
+        self.deadline_field = ft.TextField(
+            label="Дедлайн (необязательно)",
+            value=initial_deadline,
+            hint_text="ГГГГ-ММ-ДД (например: 2026-12-01)",
+            icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
+        )
+
+        self.date_picker = ft.DatePicker(
+            first_date=datetime(2020, 1, 1),
+            last_date=datetime(2035, 12, 31),
+            value=task.deadline if task.deadline else None,
+            on_change=self._on_date_picked,
+        )
+
+        self.deadline_field.suffix = ft.IconButton(
+            icon=ft.Icons.CALENDAR_TODAY_ROUNDED,
+            tooltip="Выбрать дату в календаре",
+            on_click=lambda _: self._open_calendar(),
+        )
+
+        # ── Dialog Assembly ──────────────────────────
+        FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextButton))
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.EDIT_NOTE_ROUNDED, color=ft.Colors.PRIMARY, size=26),
+                    ft.Text("Редактирование задачи", weight=ft.FontWeight.BOLD, size=20),
+                ],
+                spacing=10,
+            ),
+            content=ft.Container(
+                width=480,
+                content=ft.Column(
+                    tight=True,
+                    spacing=14,
+                    controls=[
+                        self.name_field,
+                        self.subject_dropdown,
+                        self.time_field,
+                        self.priority_dropdown,
+                        self.deadline_field,
+                    ],
+                ),
+            ),
+            actions=[
+                ft.TextButton(
+                    "Отмена",
+                    on_click=lambda _: _close_dialog(self.page, self.dialog),
+                ),
+                FilledBtn(
+                    "Сохранить изменения",
+                    icon=ft.Icons.SAVE_ROUNDED,
+                    on_click=lambda _: self._save_task(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+    def _open_calendar(self) -> None:
+        """Open native DatePicker for deadline field."""
+        if hasattr(self.page, "show_dialog"):
+            self.page.show_dialog(self.date_picker)
+        elif hasattr(self.page, "open"):
+            self.page.open(self.date_picker)
+        else:
+            self.page.overlay.append(self.date_picker)
+            self.date_picker.open = True
+            self.page.update()
+
+    def _on_date_picked(self, e: ft.ControlEvent) -> None:
+        """Handle date selection from DatePicker."""
+        if self.date_picker.value:
+            self.deadline_field.value = self.date_picker.value.strftime("%Y-%m-%d")
+            self.deadline_field.error_text = None
+            self.page.update()
+
+    def _validate(self) -> tuple[bool, str, int | None, float | None, TaskPriority, datetime | None]:
+        """Validate input fields and return parsed values or error."""
+        has_error = False
+
+        # Name
+        name = (self.name_field.value or "").strip()
+        if not name:
+            self.name_field.error_text = "Введите название задачи"
+            has_error = True
+        else:
+            self.name_field.error_text = None
+
+        # Subject
+        subject_id_raw = self.subject_dropdown.value
+        if not subject_id_raw:
+            self.subject_dropdown.error_text = "Выберите предмет"
+            has_error = True
+        else:
+            self.subject_dropdown.error_text = None
+
+        # Expected Time
+        time_raw = (self.time_field.value or "").strip()
+        expected_hours: float | None = None
+        if not time_raw:
+            self.time_field.error_text = "Укажите ожидаемое время"
+            has_error = True
+        else:
+            try:
+                minutes = float(time_raw)
+                if minutes <= 0:
+                    self.time_field.error_text = "Время должно быть больше 0"
+                    has_error = True
+                else:
+                    self.time_field.error_text = None
+                    expected_hours = round(minutes / 60.0, 4)
+            except ValueError:
+                self.time_field.error_text = "Введите корректное число"
+                has_error = True
+
+        # Priority
+        try:
+            priority = TaskPriority(self.priority_dropdown.value or TaskPriority.MEDIUM.value)
+        except ValueError:
+            priority = TaskPriority.MEDIUM
+
+        # Deadline
+        deadline_dt: datetime | None = None
+        if self.deadline_field.value:
+            try:
+                deadline_dt = _parse_deadline(self.deadline_field.value)
+                self.deadline_field.error_text = None
+            except ValueError as err:
+                self.deadline_field.error_text = str(err)
+                has_error = True
+        else:
+            self.deadline_field.error_text = None
+
+        if has_error:
+            self.page.update()
+            return False, name, None, None, priority, None
+
+        subject_id = int(subject_id_raw)
+        return True, name, subject_id, expected_hours, priority, deadline_dt
+
+    def _save_task(self) -> None:
+        """Validate, update task via TaskManager, display SnackBar, and close."""
+        valid, name, subject_id, expected_hours, priority, deadline_dt = self._validate()
+        if not valid or subject_id is None:
+            return
+
+        try:
+            updated_task: Task = self.task_manager.update_task(
+                self.task.id,
+                name=name,
+                subject_id=subject_id,
+                priority=priority,
+                expected_time=expected_hours,
+                deadline=deadline_dt,
+            )
+
+            # Close dialog first
+            _close_dialog(self.page, self.dialog)
+
+            # Intercept prediction message from update_task
+            if hasattr(updated_task, "prediction_message") and updated_task.prediction_message:
+                snack_message = updated_task.prediction_message
+            else:
+                snack_message = f"Задача '{updated_task.name}' успешно обновлена!"
+
+            # Show prediction result via SnackBar
+            _show_snack(self.page, snack_message)
+
+            # Refresh list if callback provided
+            if self.on_success:
+                self.on_success()
+
+        except Exception as err:
+            self.name_field.error_text = f"Ошибка сохранения: {err}"
+            self.page.update()
+
+    def show(self) -> None:
+        """Display the task editing dialog."""
+        _show_dialog(self.page, self.dialog)
+
+
+def open_task_edit_dialog(
+    page: ft.Page,
+    task: Task,
+    task_manager: TaskManager | None = None,
+    on_success: Callable[[], None] | None = None,
+) -> TaskEditDialog:
+    """Helper function to instantiate and show the task editing dialog."""
+    form = TaskEditDialog(page, task=task, task_manager=task_manager, on_success=on_success)
+    form.show()
+    return form
+
+
 class TaskCompleteDialog:
     """Dialog asking for actual time spent before completing a task."""
 
