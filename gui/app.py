@@ -67,7 +67,7 @@ class ScheduleScreen:
         self.scheduler = TaskScheduler()
         self.task_manager = TaskManager()
 
-        # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags
+        # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags, 3 = Archive
         self.current_tab = 0
         self.sidebar_collapsed = False
         self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
@@ -77,6 +77,7 @@ class ScheduleScreen:
         self.today_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.all_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.archive_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
 
@@ -185,7 +186,7 @@ class ScheduleScreen:
     # Tab Switching & Navigation
     # ──────────────────────────────────────────
     def switch_tab(self, tab_index: int) -> None:
-        """Switch active tab: 0 (Today), 1 (All Tasks), 2 (Tags)."""
+        """Switch active tab: 0 (Today), 1 (All Tasks), 2 (Tags), 3 (Archive)."""
         if self.current_tab != tab_index:
             self.current_tab = tab_index
             self._render_sidebar()
@@ -447,6 +448,8 @@ class ScheduleScreen:
         all_tags = self.task_manager.get_all_subjects()
         all_tasks = self.task_manager.get_all_tasks()
         completed_total_count = len([t for t in all_tasks if t.status == TaskStatus.COMPLETED])
+        archived_tasks = self.task_manager.get_archived_tasks()
+        archived_count = len(archived_tasks)
 
         # Active indicator styling
         def _nav_button(
@@ -530,6 +533,7 @@ class ScheduleScreen:
                 _nav_button("Сегодняшние задачи", ft.Icons.TODAY_ROUNDED, 0, str(today_active)),
                 _nav_button("Все задачи", ft.Icons.CHECKLIST_ROUNDED, 1, str(all_active)),
                 _nav_button("Теги и предметы", ft.Icons.LOCAL_OFFER_ROUNDED, 2, str(len(all_tags))),
+                _nav_button("Архив", ft.Icons.INVENTORY_2_ROUNDED, 3, str(archived_count) if archived_count > 0 else None),
             ],
         )
 
@@ -570,6 +574,13 @@ class ScheduleScreen:
                             ft.Text(str(completed_total_count), size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
                         ],
                     ),
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        controls=[
+                            ft.Text("В архиве:", size=12, color=ft.Colors.GREY_400, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                            ft.Text(str(archived_count), size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
+                        ],
+                    ),
                 ],
             ),
         )
@@ -580,7 +591,7 @@ class ScheduleScreen:
             content=ft.IconButton(
                 icon=ft.Icons.QUERY_STATS_ROUNDED,
                 icon_color=ft.Colors.GREY_400,
-                tooltip=f"На сегодня: {today_active} | Всего: {all_active} | Завершено: {completed_total_count}",
+                tooltip=f"На сегодня: {today_active} | Всего: {all_active} | Архив: {archived_count}",
                 on_click=lambda _: self.toggle_sidebar(),
             ),
         )
@@ -681,6 +692,13 @@ class ScheduleScreen:
                 max_lines=1,
                 overflow=ft.TextOverflow.ELLIPSIS,
             )
+            archive_btn = ft.IconButton(
+                icon=ft.Icons.ARCHIVE_ROUNDED,
+                icon_size=18,
+                tooltip="Отправить в архив",
+                icon_color=ft.Colors.CYAN_300,
+                on_click=lambda _, tid=task.id, tname=task.name: self.archive_task(tid, tname),
+            )
             action_btn = ft.IconButton(
                 icon=ft.Icons.RESTORE_ROUNDED,
                 icon_size=18,
@@ -695,6 +713,7 @@ class ScheduleScreen:
                 border_radius=6,
             )
         else:
+            archive_btn = None
             status_icon = ft.Icon(
                 priority_icon,
                 color=priority_color,
@@ -723,16 +742,20 @@ class ScheduleScreen:
                 border_radius=6,
             )
 
+        header_controls: list[ft.Control] = [
+            status_icon,
+            title_text,
+            tag_badge,
+            score_or_status,
+        ]
+        if archive_btn is not None:
+            header_controls.append(archive_btn)
+        header_controls.append(action_btn)
+
         header_row = ft.Row(
-            spacing=6,
+            spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                status_icon,
-                title_text,
-                tag_badge,
-                score_or_status,
-                action_btn,
-            ],
+            controls=header_controls,
         )
 
         # Compact Metadata badges in a wrap row
@@ -848,8 +871,9 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     # Tab 0: Today's Tasks
     # ──────────────────────────────────────────
-    def _build_completed_divider(self, completed_count: int) -> ft.Control:
-        """Build a straight horizontal dividing line separating uncompleted and completed tasks."""
+    def _build_completed_divider(self, completed_count: int, only_today: bool = True) -> ft.Control:
+        """Build a horizontal divider separating uncompleted and completed tasks with an archive-all action."""
+        title = f"Завершенные сегодня задачи ({completed_count})" if only_today else f"Завершенные задачи ({completed_count})"
         return ft.Container(
             padding=ft.Padding(left=0, top=14, right=0, bottom=6),
             content=ft.Column(
@@ -857,14 +881,26 @@ class ScheduleScreen:
                 controls=[
                     ft.Divider(height=2, thickness=2, color=ft.Colors.OUTLINE),
                     ft.Row(
-                        spacing=6,
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
-                            ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=ft.Colors.GREEN_400),
-                            ft.Text(
-                                f"Завершенные сегодня задачи ({completed_count})",
-                                size=12,
-                                weight=ft.FontWeight.BOLD,
-                                color=ft.Colors.GREY_400,
+                            ft.Row(
+                                spacing=6,
+                                controls=[
+                                    ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=ft.Colors.GREEN_400),
+                                    ft.Text(
+                                        title,
+                                        size=12,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=ft.Colors.GREY_400,
+                                    ),
+                                ],
+                            ),
+                            ft.TextButton(
+                                "Все в архив",
+                                icon=ft.Icons.ARCHIVE_ROUNDED,
+                                tooltip="Отправить все завершенные задачи в архив",
+                                on_click=lambda _: self.archive_all_completed(only_today=only_today),
                             ),
                         ],
                     ),
@@ -1501,7 +1537,7 @@ class ScheduleScreen:
 
         # 2. Add straight divider line and completed tasks
         if completed_tasks:
-            self.all_tasks_column.controls.append(self._build_completed_divider(len(completed_tasks)))
+            self.all_tasks_column.controls.append(self._build_completed_divider(len(completed_tasks), only_today=False))
             for scored in completed_tasks:
                 self.all_tasks_column.controls.append(self.build_task_card(scored, 0))
 
@@ -1788,6 +1824,288 @@ class ScheduleScreen:
         )
 
     # ──────────────────────────────────────────
+    # Tab 3: Archive View
+    # ──────────────────────────────────────────
+    def build_archived_task_card(self, task: Task) -> ft.Card:
+        """Render a single archived task card with unarchive, restore, and delete actions."""
+        subject = task.subject
+        tag_name = subject.name if subject else "Без предмета"
+        tag_icon = subject.icon if subject else "🏷️"
+        tag_color = subject.color if subject else "#607D8B"
+
+        priority_label, priority_color, _ = self._get_priority_details(task.priority)
+        time_str = self._format_time(task.expected_time)
+
+        # Completed date string
+        completed_str = task.completed_at.strftime("%d.%m.%Y") if task.completed_at else "Ранее"
+
+        tag_badge = ft.Container(
+            content=ft.Row(
+                spacing=4,
+                tight=True,
+                controls=[
+                    ft.Text(tag_icon, size=13),
+                    ft.Text(
+                        tag_name,
+                        size=12,
+                        weight=ft.FontWeight.W_600,
+                        color=tag_color,
+                    ),
+                ],
+            ),
+            bgcolor=ft.Colors.with_opacity(0.12, tag_color),
+            border=ft.Border.all(width=1, color=ft.Colors.with_opacity(0.35, tag_color)),
+            padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+            border_radius=6,
+        )
+
+        status_icon = ft.Icon(
+            ft.Icons.INVENTORY_2_ROUNDED,
+            color=ft.Colors.CYAN_300,
+            size=19,
+        )
+
+        title_text = ft.Text(
+            f"✓ {task.name}",
+            size=14,
+            weight=ft.FontWeight.W_500,
+            style=ft.TextStyle(
+                decoration=ft.TextDecoration.LINE_THROUGH,
+                color=ft.Colors.GREY_400,
+            ),
+            expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+
+        status_badge = ft.Container(
+            content=ft.Text("В архиве", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.CYAN_300),
+            bgcolor=ft.Colors.with_opacity(0.16, ft.Colors.CYAN_400),
+            padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+            border_radius=6,
+        )
+
+        # Unarchive (return from archive back to completed list)
+        unarchive_btn = ft.IconButton(
+            icon=ft.Icons.UNARCHIVE_ROUNDED,
+            icon_size=18,
+            tooltip="Вернуть из архива",
+            icon_color=ft.Colors.CYAN_300,
+            on_click=lambda _, tid=task.id, tname=task.name: self.unarchive_task(tid, tname),
+        )
+
+        # Reopen (return to active work)
+        restore_btn = ft.IconButton(
+            icon=ft.Icons.RESTORE_ROUNDED,
+            icon_size=18,
+            tooltip="Вернуть в работу (активные задачи)",
+            icon_color=ft.Colors.GREEN_400,
+            on_click=lambda _, tid=task.id, tname=task.name: self.reopen_archived_task(tid, tname),
+        )
+
+        # Delete permanently
+        delete_btn = ft.IconButton(
+            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+            icon_size=18,
+            tooltip="Удалить навсегда",
+            icon_color=ft.Colors.RED_400,
+            on_click=lambda _, tid=task.id, tname=task.name: self.confirm_delete_archived_task(tid, tname),
+        )
+
+        header_row = ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                status_icon,
+                title_text,
+                tag_badge,
+                status_badge,
+                unarchive_btn,
+                restore_btn,
+                delete_btn,
+            ],
+        )
+
+        metadata_chips = [
+            ft.Container(
+                content=ft.Row(
+                    spacing=4,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.EVENT_AVAILABLE_ROUNDED, size=13, color=ft.Colors.GREEN_400),
+                        ft.Text(f"Завершено: {completed_str}", size=12, color=ft.Colors.GREEN_300, weight=ft.FontWeight.W_500),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.10, ft.Colors.GREEN_400),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    spacing=4,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=13, color=ft.Colors.CYAN_300),
+                        ft.Text(time_str, size=12, color=ft.Colors.CYAN_200, weight=ft.FontWeight.W_600),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.10, ft.Colors.CYAN_400),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    spacing=4,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.FLAG_ROUNDED, size=13, color=ft.Colors.GREY_500),
+                        ft.Text(priority_label, size=12, color=ft.Colors.GREY_500, weight=ft.FontWeight.W_500),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.08, priority_color),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+        ]
+
+        meta_row = ft.Row(
+            spacing=6,
+            run_spacing=4,
+            wrap=True,
+            controls=metadata_chips,
+        )
+
+        card_controls: list[ft.Control] = [header_row, meta_row]
+        if task.description:
+            card_controls.append(
+                ft.Text(
+                    task.description,
+                    size=12,
+                    color=ft.Colors.GREY_500,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                )
+            )
+
+        return ft.Card(
+            elevation=1,
+            content=ft.Container(
+                padding=ft.Padding(left=12, top=8, right=10, bottom=8),
+                border_radius=10,
+                ink=True,
+                opacity=0.88,
+                content=ft.Column(
+                    spacing=5,
+                    tight=True,
+                    controls=card_controls,
+                ),
+            ),
+        )
+
+    def load_archived_tasks(self) -> None:
+        """Fetch all archived tasks and populate the archive column."""
+        self.archive_column.controls.clear()
+        archived = self.task_manager.get_archived_tasks()
+
+        if not archived:
+            self.archive_column.controls.append(
+                ft.Card(
+                    elevation=1,
+                    content=ft.Container(
+                        padding=40,
+                        alignment=ft.Alignment(0, 0),
+                        content=ft.Column(
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=12,
+                            controls=[
+                                ft.Icon(
+                                    ft.Icons.INVENTORY_2_OUTLINED,
+                                    size=48,
+                                    color=ft.Colors.CYAN_300,
+                                ),
+                                ft.Text(
+                                    "Архив пуст",
+                                    size=18,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Text(
+                                    "Выполненные задачи можно отправлять в архив кнопкой 📦 на карточке задачи или «Все в архив».",
+                                    size=14,
+                                    color=ft.Colors.GREY_400,
+                                    text_align=ft.TextAlign.CENTER,
+                                ),
+                            ],
+                        ),
+                    ),
+                )
+            )
+            return
+
+        for task in archived:
+            self.archive_column.controls.append(self.build_archived_task_card(task))
+
+    def _render_archive_view(self) -> ft.Control:
+        """Build the 'Архив задач' view."""
+        self.load_archived_tasks()
+        archived = self.task_manager.get_archived_tasks()
+
+        header_actions = []
+        if archived:
+            header_actions.append(
+                ft.OutlinedButton(
+                    "Очистить архив",
+                    icon=ft.Icons.DELETE_SWEEP_ROUNDED,
+                    style=ft.ButtonStyle(
+                        color=ft.Colors.RED_400,
+                    ) if hasattr(ft, "ButtonStyle") else None,
+                    on_click=lambda _: self.confirm_clear_archive(),
+                )
+            )
+
+        header = ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            wrap=True,
+            controls=[
+                ft.Column(
+                    spacing=4,
+                    controls=[
+                        ft.Row(
+                            [
+                                ft.Icon(
+                                    ft.Icons.INVENTORY_2_ROUNDED,
+                                    color=ft.Colors.CYAN_300,
+                                    size=26,
+                                ),
+                                ft.Text(
+                                    "Архив задач",
+                                    size=22,
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        ft.Text(
+                            f"Завершенные задачи, отправленные на долгосрочное хранение ({len(archived)})",
+                            size=13,
+                            color=ft.Colors.GREY_400,
+                        ),
+                    ],
+                ),
+                ft.Row(spacing=8, wrap=True, controls=header_actions),
+            ],
+        )
+
+        return ft.Column(
+            spacing=16,
+            expand=True,
+            controls=[
+                header,
+                ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                self.archive_column,
+            ],
+        )
+
+    # ──────────────────────────────────────────
     # Rendering & View Updates
     # ──────────────────────────────────────────
     def _render_content(self) -> None:
@@ -1796,8 +2114,10 @@ class ScheduleScreen:
             self.content_area.content = self._render_today_tasks_view()
         elif self.current_tab == 1:
             self.content_area.content = self._render_all_tasks_view()
-        else:
+        elif self.current_tab == 2:
             self.content_area.content = self._render_tags_view()
+        else:
+            self.content_area.content = self._render_archive_view()
 
     def _handle_page_resize(self, e: ft.ControlEvent | None = None) -> None:
         """Handle screen resizing adaptively for various screen dimensions."""
@@ -1890,6 +2210,122 @@ class ScheduleScreen:
             bgcolor=ft.Colors.BLUE_800,
         )
         self.refresh()
+
+    def archive_task(self, task_id: int, task_name: str) -> None:
+        """Move a completed task to the archive."""
+        self.task_manager.archive_task(task_id)
+        _show_snack(
+            self.page,
+            f"Задача «{task_name}» отправлена в архив!",
+            bgcolor=ft.Colors.CYAN_800,
+        )
+        self.refresh()
+
+    def archive_all_completed(self, only_today: bool = False) -> None:
+        """Move all completed tasks to the archive."""
+        count = self.task_manager.archive_all_completed_tasks(only_today=only_today)
+        if count > 0:
+            _show_snack(
+                self.page,
+                f"Отправлено в архив задач: {count} шт.",
+                bgcolor=ft.Colors.CYAN_800,
+            )
+        else:
+            _show_snack(
+                self.page,
+                "Нет завершенных задач для отправки в архив.",
+                bgcolor=ft.Colors.GREY_800,
+            )
+        self.refresh()
+
+    def unarchive_task(self, task_id: int, task_name: str) -> None:
+        """Return a task from the archive back to completed list."""
+        self.task_manager.unarchive_task(task_id, reopen=False)
+        _show_snack(
+            self.page,
+            f"Задача «{task_name}» возвращена из архива!",
+            bgcolor=ft.Colors.CYAN_800,
+        )
+        self.refresh()
+
+    def reopen_archived_task(self, task_id: int, task_name: str) -> None:
+        """Return an archived task directly to active work."""
+        self.task_manager.reopen_task(task_id)
+        _show_snack(
+            self.page,
+            f"Задача «{task_name}» возвращена в активные задачи!",
+            bgcolor=ft.Colors.GREEN_800,
+        )
+        self.refresh()
+
+    def confirm_delete_archived_task(self, task_id: int, task_name: str) -> None:
+        """Show confirmation dialog before permanently deleting an archived task."""
+        def _execute_delete(_):
+            _close_dialog(self.page, delete_dialog)
+            success = self.task_manager.delete_task(task_id)
+            if success:
+                _show_snack(
+                    self.page,
+                    f"Задача «{task_name}» навсегда удалена.",
+                    bgcolor=ft.Colors.RED_800,
+                )
+            self.refresh()
+
+        delete_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.WARNING_ROUNDED, color=ft.Colors.RED_400),
+                    ft.Text("Удалить задачу?", weight=ft.FontWeight.BOLD),
+                ],
+                spacing=8,
+            ),
+            content=ft.Text(f"Вы уверены, что хотите навсегда удалить задачу «{task_name}» из архива? Это действие необратимо."),
+            actions=[
+                ft.TextButton("Отмена", on_click=lambda _: _close_dialog(self.page, delete_dialog)),
+                FilledBtn(
+                    "Удалить навсегда",
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE) if hasattr(ft, "ButtonStyle") else None,
+                    on_click=_execute_delete,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        _show_dialog(self.page, delete_dialog)
+
+    def confirm_clear_archive(self) -> None:
+        """Show confirmation dialog before clearing the entire archive."""
+        def _execute_clear(_):
+            _close_dialog(self.page, clear_dialog)
+            count = self.task_manager.clear_archive()
+            _show_snack(
+                self.page,
+                f"Архив очищен. Удалено задач: {count} шт.",
+                bgcolor=ft.Colors.RED_800,
+            )
+            self.refresh()
+
+        clear_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.DELETE_SWEEP_ROUNDED, color=ft.Colors.RED_400),
+                    ft.Text("Очистить весь архив?", weight=ft.FontWeight.BOLD),
+                ],
+                spacing=8,
+            ),
+            content=ft.Text("Все задачи в архиве будут удалены безвозвратно. Продолжить?"),
+            actions=[
+                ft.TextButton("Отмена", on_click=lambda _: _close_dialog(self.page, clear_dialog)),
+                FilledBtn(
+                    "Очистить",
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE) if hasattr(ft, "ButtonStyle") else None,
+                    on_click=_execute_clear,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        _show_dialog(self.page, clear_dialog)
 
     def open_add_tag_dialog(self) -> None:
         """Open dialog to create a new tag/subject."""

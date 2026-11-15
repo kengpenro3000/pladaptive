@@ -78,4 +78,8 @@ def init_db() -> None:
                 WHERE tasks.status = 'completed' AND tasks.completed_at IS NULL
             """)
 
+        # Ensure is_archived column exists on tasks table
+        if "is_archived" not in cols_tasks:
+            conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0")
+
         conn.commit()

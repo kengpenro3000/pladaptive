@@ -123,10 +123,13 @@ class TaskScheduler:
             target = target_date or date.today()
             end_of_day = datetime.combine(target, datetime.max.time())
 
+            not_archived = (Task.is_archived == False) | (Task.is_archived.is_(None))
+
             if only_today:
                 # Active incomplete tasks scheduled for today or overdue
                 is_active = (
-                    (Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]))
+                    not_archived
+                    & (Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]))
                     & (
                         (Task.scheduled_date == target)
                         | (Task.scheduled_date < target)
@@ -137,9 +140,10 @@ class TaskScheduler:
                     )
                 )
                 if include_completed_today:
-                    # Completed today
+                    # Completed today and not archived
                     is_done_today = (
-                        (Task.status == TaskStatus.COMPLETED)
+                        not_archived
+                        & (Task.status == TaskStatus.COMPLETED)
                         & (Task.completed_at == target)
                     )
                     condition = is_active | is_done_today
@@ -147,10 +151,11 @@ class TaskScheduler:
                     condition = is_active
             else:
                 # All active tasks
-                is_active = Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED])
+                is_active = not_archived & Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED])
                 if include_completed_today:
                     is_done_today = (
-                        (Task.status == TaskStatus.COMPLETED)
+                        not_archived
+                        & (Task.status == TaskStatus.COMPLETED)
                         & (Task.completed_at == target)
                     )
                     condition = is_active | is_done_today

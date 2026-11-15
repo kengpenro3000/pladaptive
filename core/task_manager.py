@@ -197,12 +197,14 @@ class TaskManager:
 
         return task
 
-    def get_all_tasks(self) -> list[Task]:
+    def get_all_tasks(self, include_archived: bool = False) -> list[Task]:
         """Return every task ordered by deadline (nulls last), then priority."""
         with self._session() as session:
+            query = session.query(Task)
+            if not include_archived:
+                query = query.filter((Task.is_archived == False) | (Task.is_archived.is_(None)))
             tasks = (
-                session.query(Task)
-                .order_by(
+                query.order_by(
                     Task.deadline.is_(None),   # NULLs go last
                     Task.deadline,
                     Task.priority,
@@ -213,13 +215,14 @@ class TaskManager:
                 _ = t.subject
             return tasks
 
-    def get_tasks_by_subject(self, subject_id: int) -> list[Task]:
+    def get_tasks_by_subject(self, subject_id: int, include_archived: bool = False) -> list[Task]:
         """Return all tasks belonging to a given subject."""
         with self._session() as session:
+            query = session.query(Task).filter(Task.subject_id == subject_id)
+            if not include_archived:
+                query = query.filter((Task.is_archived == False) | (Task.is_archived.is_(None)))
             tasks = (
-                session.query(Task)
-                .filter(Task.subject_id == subject_id)
-                .order_by(Task.deadline)
+                query.order_by(Task.deadline)
                 .all()
             )
             for t in tasks:
@@ -241,6 +244,7 @@ class TaskManager:
             tasks = (
                 session.query(Task)
                 .filter(
+                    (Task.is_archived == False) | (Task.is_archived.is_(None)),
                     Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.CANCELLED]),
                     (
                         (Task.scheduled_date == target)
@@ -397,7 +401,7 @@ class TaskManager:
             return task
 
     def reopen_task(self, task_id: int) -> Task:
-        """Reopen a completed task back to PENDING status."""
+        """Reopen a completed task back to PENDING status and unarchive it."""
         with self._session() as session:
             task = session.get(Task, task_id)
             if task is None:
@@ -405,9 +409,99 @@ class TaskManager:
 
             task.status = TaskStatus.PENDING
             task.completed_at = None
+            task.is_archived = False
             session.flush()
             _ = task.subject
             return task
+
+    # ──────────────────────────────────────────
+    # Archive operations
+    # ──────────────────────────────────────────
+    def archive_task(self, task_id: int) -> Task:
+        """Move a completed (or active) task to the archive."""
+        with self._session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise ValueError(f"Task with id={task_id} not found.")
+
+            task.is_archived = True
+            session.flush()
+            _ = task.subject
+            return task
+
+    def unarchive_task(self, task_id: int, reopen: bool = False) -> Task:
+        """Restore a task from the archive.
+
+        If *reopen* is True, marks task as PENDING and clears completed_at.
+        Otherwise leaves status as COMPLETED.
+        """
+        with self._session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise ValueError(f"Task with id={task_id} not found.")
+
+            task.is_archived = False
+            if reopen:
+                task.status = TaskStatus.PENDING
+                task.completed_at = None
+            session.flush()
+            _ = task.subject
+            return task
+
+    def archive_all_completed_tasks(self, only_today: bool = False) -> int:
+        """Archive all completed tasks (or only those completed today).
+
+        Returns:
+            The number of tasks moved to archive.
+        """
+        with self._session() as session:
+            query = session.query(Task).filter(
+                Task.status == TaskStatus.COMPLETED,
+                (Task.is_archived != True) | (Task.is_archived.is_(None)),
+            )
+            if only_today:
+                query = query.filter(Task.completed_at == date.today())
+            tasks = query.all()
+            count = len(tasks)
+            for t in tasks:
+                t.is_archived = True
+            session.flush()
+            return count
+
+    def get_archived_tasks(self) -> list[Task]:
+        """Return all archived tasks ordered by completed_at desc, then id desc."""
+        with self._session() as session:
+            tasks = (
+                session.query(Task)
+                .filter(Task.is_archived == True)
+                .order_by(
+                    Task.completed_at.desc(),
+                    Task.id.desc(),
+                )
+                .all()
+            )
+            for t in tasks:
+                _ = t.subject
+            return tasks
+
+    def delete_task(self, task_id: int) -> bool:
+        """Permanently delete a task by its ID."""
+        with self._session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                return False
+            session.delete(task)
+            return True
+
+    def clear_archive(self) -> int:
+        """Permanently delete all archived tasks."""
+        with self._session() as session:
+            tasks = session.query(Task).filter(Task.is_archived == True).all()
+            count = len(tasks)
+            for t in tasks:
+                session.delete(t)
+            session.flush()
+            return count
 
     def complete_all_active_tasks(self, task_ids: list[int] | None = None) -> int:
         """Mark all (or specified) incomplete tasks as completed and record them into History.

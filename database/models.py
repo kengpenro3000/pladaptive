@@ -6,6 +6,7 @@ import enum
 from datetime import datetime, date
 
 from sqlalchemy import (
+    Boolean,
     String,
     Text,
     Integer,
@@ -122,6 +123,14 @@ class Task(Base):
         Date,
         nullable=True,
         comment="Date when the task was completed",
+    )
+
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="0",
+        nullable=False,
+        comment="Whether the task has been moved to archive",
     )
 
     # many-to-one → Subject
