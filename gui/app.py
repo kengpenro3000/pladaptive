@@ -17,6 +17,7 @@ import flet as ft
 
 from core.scheduler import ScoredTask, TaskScheduler
 from database.models import TaskPriority
+from ai.predictor import TimePredictor
 
 
 class ScheduleScreen:
@@ -100,13 +101,165 @@ class ScheduleScreen:
             task.deadline, scored.days_left
         )
 
+        # AI Prediction info (if history is available)
+        ai_pred_str = None
+        if task.expected_time is not None:
+            try:
+                pred = TimePredictor().predict_time(task.subject_id, task.expected_time)
+                if not pred.cold_start:
+                    pred_min = round(pred.predicted_time * 60, 1)
+                    if pred_min.is_integer():
+                        pred_min = int(pred_min)
+                    ai_pred_str = f"~{pred_min} мин"
+            except Exception:
+                ai_pred_str = None
+
+        # Build prominent subtitle for ListTile
+        subtitle_rows = [
+            ft.Row(
+                spacing=8,
+                wrap=True,
+                controls=[
+                    # Prominent Expected Time
+                    ft.Container(
+                        content=ft.Row(
+                            spacing=5,
+                            controls=[
+                                ft.Icon(
+                                    ft.Icons.ACCESS_TIME_FILLED_ROUNDED,
+                                    size=15,
+                                    color=ft.Colors.CYAN_300,
+                                ),
+                                ft.Text(
+                                    f"Ожидаемое время: {time_str}",
+                                    size=13,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.CYAN_200,
+                                ),
+                            ],
+                        ),
+                        bgcolor=ft.Colors.with_opacity(0.15, ft.Colors.CYAN_400),
+                        padding=ft.Padding(left=8, top=3, right=8, bottom=3),
+                        border_radius=6,
+                    ),
+                    # Subject tag
+                    ft.Container(
+                        content=ft.Row(
+                            spacing=5,
+                            controls=[
+                                ft.Icon(
+                                    ft.Icons.MENU_BOOK_ROUNDED,
+                                    size=15,
+                                    color=ft.Colors.LIGHT_BLUE_300,
+                                ),
+                                ft.Text(
+                                    subject_name,
+                                    size=13,
+                                    weight=ft.FontWeight.W_500,
+                                    color=ft.Colors.LIGHT_BLUE_100,
+                                ),
+                            ],
+                        ),
+                        bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.LIGHT_BLUE_400),
+                        padding=ft.Padding(left=8, top=3, right=8, bottom=3),
+                        border_radius=6,
+                    ),
+                ],
+            )
+        ]
+
+        if task.description:
+            subtitle_rows.append(
+                ft.Text(
+                    task.description,
+                    size=13,
+                    color=ft.Colors.GREY_400,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                )
+            )
+
+        footer_controls = [
+            # Priority Badge
+            ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.FLAG_ROUNDED,
+                        size=16,
+                        color=priority_color,
+                    ),
+                    ft.Text(
+                        f"Приоритет: {priority_label}",
+                        size=13,
+                        color=priority_color,
+                        weight=ft.FontWeight.W_600,
+                    ),
+                ],
+                spacing=4,
+            ),
+            # Expected Time
+            ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.ACCESS_TIME_ROUNDED,
+                        size=16,
+                        color=ft.Colors.CYAN_300,
+                    ),
+                    ft.Text(
+                        f"Ожидаемое время: {time_str}",
+                        size=13,
+                        weight=ft.FontWeight.W_600,
+                        color=ft.Colors.CYAN_100,
+                    ),
+                ],
+                spacing=4,
+            ),
+            # Deadline
+            ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.CALENDAR_TODAY_ROUNDED,
+                        size=16,
+                        color=deadline_color,
+                    ),
+                    ft.Text(
+                        f"Дедлайн: {deadline_str}",
+                        size=13,
+                        color=deadline_color,
+                    ),
+                ],
+                spacing=4,
+            ),
+        ]
+
+        # Add AI predicted time tag if available
+        if ai_pred_str:
+            footer_controls.append(
+                ft.Row(
+                    [
+                        ft.Icon(
+                            ft.Icons.AUTO_AWESOME_ROUNDED,
+                            size=16,
+                            color=ft.Colors.AMBER_400,
+                        ),
+                        ft.Text(
+                            f"Прогноз ИИ: {ai_pred_str}",
+                            size=13,
+                            color=ft.Colors.AMBER_300,
+                            weight=ft.FontWeight.W_500,
+                        ),
+                    ],
+                    spacing=4,
+                )
+            )
+
         return ft.Card(
             elevation=3,
             content=ft.Container(
                 padding=14,
                 border_radius=12,
                 content=ft.Column(
-                    spacing=10,
+                    spacing=12,
                     controls=[
                         # Main ListTile with title, priority icon, rank, and score
                         ft.ListTile(
@@ -123,13 +276,7 @@ class ScheduleScreen:
                                 size=16,
                                 weight=ft.FontWeight.W_600,
                             ),
-                            subtitle=ft.Text(
-                                task.description or "Без дополнительного описания",
-                                size=13,
-                                color=ft.Colors.GREY_400,
-                                max_lines=2,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
+                            subtitle=ft.Column(spacing=6, controls=subtitle_rows),
                             trailing=ft.Container(
                                 content=ft.Text(
                                     f"Вес: {scored.score:.1f}",
@@ -143,78 +290,13 @@ class ScheduleScreen:
                             ),
                         ),
                         ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                        # Metadata row: Subject, Priority, Expected Time, Deadline
+                        # Metadata footer row: Priority, Expected Time, Deadline, AI Prediction
                         ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             wrap=True,
                             spacing=12,
                             run_spacing=8,
-                            controls=[
-                                # Subject
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            ft.Icons.MENU_BOOK_ROUNDED,
-                                            size=16,
-                                            color=ft.Colors.LIGHT_BLUE_400,
-                                        ),
-                                        ft.Text(
-                                            f"Предмет: {subject_name}",
-                                            size=13,
-                                            weight=ft.FontWeight.W_500,
-                                        ),
-                                    ],
-                                    spacing=4,
-                                ),
-                                # Priority Badge
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            ft.Icons.FLAG_ROUNDED,
-                                            size=16,
-                                            color=priority_color,
-                                        ),
-                                        ft.Text(
-                                            f"Приоритет: {priority_label}",
-                                            size=13,
-                                            color=priority_color,
-                                            weight=ft.FontWeight.W_600,
-                                        ),
-                                    ],
-                                    spacing=4,
-                                ),
-                                # Expected Time
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            ft.Icons.ACCESS_TIME_ROUNDED,
-                                            size=16,
-                                            color=ft.Colors.CYAN_300,
-                                        ),
-                                        ft.Text(
-                                            f"Время: {time_str}",
-                                            size=13,
-                                        ),
-                                    ],
-                                    spacing=4,
-                                ),
-                                # Deadline
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            ft.Icons.CALENDAR_TODAY_ROUNDED,
-                                            size=16,
-                                            color=deadline_color,
-                                        ),
-                                        ft.Text(
-                                            f"Дедлайн: {deadline_str}",
-                                            size=13,
-                                            color=deadline_color,
-                                        ),
-                                    ],
-                                    spacing=4,
-                                ),
-                            ],
+                            controls=footer_controls,
                         ),
                     ],
                 ),
