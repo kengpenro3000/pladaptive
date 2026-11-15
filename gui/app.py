@@ -142,6 +142,8 @@ class ScheduleScreen:
         self.right_panel_mode: str = "task"  # "task" or "tag"
         self.selected_task_id: int | None = None
         self.selected_tag_id: int | None = None
+        self._last_selected_task_id: int | None = None
+        self._last_selected_tag_id: int | None = None
         self.right_panel_width: int = 400
         self.right_panel_container: ft.Container = self._build_right_panel_container()
         self.right_panel_barrier: ft.Container = self._build_right_panel_barrier()
@@ -974,6 +976,7 @@ class ScheduleScreen:
         )
 
         card_container = ft.Container(
+            key=f"task_card_container_{task.id}",
             padding=ft.Padding(left=12, top=8, right=10, bottom=8),
             border_radius=10,
             border=card_border,
@@ -990,6 +993,7 @@ class ScheduleScreen:
         self._task_card_containers[task.id] = card_container
 
         return ft.Card(
+            key=f"task_card_{task.id}",
             elevation=1 if is_completed else (3 if is_selected else 2),
             content=card_container,
         )
@@ -1869,6 +1873,7 @@ class ScheduleScreen:
         )
 
         tag_card_container = ft.Container(
+            key=f"tag_card_container_{tag.id}",
             padding=ft.Padding(left=10, top=6, right=8, bottom=6),
             border_radius=10,
             border=card_border,
@@ -1891,6 +1896,7 @@ class ScheduleScreen:
         self._tag_card_containers[tag.id] = tag_card_container
 
         return ft.Card(
+            key=f"tag_card_{tag.id}",
             elevation=1 if not is_selected else 2,
             content=tag_card_container,
         )
@@ -2331,6 +2337,7 @@ class ScheduleScreen:
         )
 
         card_container = ft.Container(
+            key=f"archive_card_container_{task.id}",
             padding=ft.Padding(left=12, top=8, right=10, bottom=8),
             border_radius=10,
             border=card_border,
@@ -2347,6 +2354,7 @@ class ScheduleScreen:
         self._task_card_containers[task.id] = card_container
 
         return ft.Card(
+            key=f"archive_card_{task.id}",
             elevation=1 if not is_selected else 2,
             content=card_container,
         )
@@ -2794,6 +2802,7 @@ class ScheduleScreen:
             _show_snack(self.page, f"Описание и данные задачи «{name_val}» сохранены!", bgcolor=ft.Colors.GREEN_800)
             self.refresh()
             self._render_right_panel_content(updated_task)
+            self._scroll_to_task(task.id)
             self.page.update()
 
         # ── Action buttons row ────────────────────────────
@@ -3088,6 +3097,7 @@ class ScheduleScreen:
                 _show_snack(self.page, f"Тег «{name_val}» успешно обновлен!", bgcolor=ft.Colors.GREEN_800)
                 self.refresh()
                 self._render_right_tag_panel_content(updated_tag)
+                self._scroll_to_tag(tag.id)
                 self.page.update()
             except Exception as err:
                 _show_snack(self.page, f"Ошибка при обновлении тега: {err}", bgcolor=ft.Colors.RED_800)
@@ -3127,11 +3137,96 @@ class ScheduleScreen:
             actions_row,
         ]
 
+    def _scroll_to_task(self, task_id: int) -> None:
+        """Ensure the active list view stays scrolled to the edited/selected task."""
+        if not getattr(self, "page", None):
+            return
+
+        if self.current_tab == 0:
+            target_list = self.today_tasks_column
+            scroll_key = f"task_card_{task_id}"
+        elif self.current_tab == 1:
+            target_list = self.all_tasks_column
+            scroll_key = f"task_card_{task_id}"
+        elif self.current_tab == 3:
+            target_list = self.archive_column
+            scroll_key = f"archive_card_{task_id}"
+        else:
+            return
+
+        try:
+            _ = target_list.page
+        except Exception:
+            return
+
+        # Estimate approximate offset in case scroll_key is out-of-viewport in virtualized list
+        approx_offset = None
+        for idx, c in enumerate(target_list.controls):
+            if getattr(c, "key", None) == scroll_key:
+                approx_offset = max(0.0, float(idx * 110 - 20))
+                break
+
+        async def _do_scroll():
+            import asyncio
+            await asyncio.sleep(0.03)
+            try:
+                await target_list.scroll_to(scroll_key=scroll_key, duration=150)
+            except Exception:
+                if approx_offset is not None:
+                    try:
+                        await target_list.scroll_to(offset=approx_offset, duration=150)
+                    except Exception:
+                        pass
+
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(_do_scroll)
+        except Exception:
+            pass
+
+    def _scroll_to_tag(self, tag_id: int) -> None:
+        """Ensure the tags list view stays scrolled to the edited/selected tag."""
+        if not getattr(self, "page", None) or self.current_tab != 2:
+            return
+
+        target_list = self.tags_column
+        scroll_key = f"tag_card_{tag_id}"
+
+        try:
+            _ = target_list.page
+        except Exception:
+            return
+
+        approx_offset = None
+        for idx, c in enumerate(target_list.controls):
+            if getattr(c, "key", None) == scroll_key:
+                approx_offset = max(0.0, float(idx * 65 - 20))
+                break
+
+        async def _do_scroll():
+            import asyncio
+            await asyncio.sleep(0.03)
+            try:
+                await target_list.scroll_to(scroll_key=scroll_key, duration=150)
+            except Exception:
+                if approx_offset is not None:
+                    try:
+                        await target_list.scroll_to(offset=approx_offset, duration=150)
+                    except Exception:
+                        pass
+
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(_do_scroll)
+        except Exception:
+            pass
+
     def open_right_tag_panel(self, tag: Subject) -> None:
         """Open the translucent right panel for editing a tag."""
         prev_id = self.selected_tag_id
         self.right_panel_mode = "tag"
         self.selected_tag_id = tag.id
+        self._last_selected_tag_id = tag.id
         self.selected_task_id = None
         self.right_panel_open = True
         w = getattr(self.page, "width", 1000) or 1000
@@ -3144,16 +3239,31 @@ class ScheduleScreen:
 
         if prev_id and prev_id in self._tag_card_containers:
             self._tag_card_containers[prev_id].border = None
+            try:
+                self._tag_card_containers[prev_id].update()
+            except Exception:
+                pass
         if tag.id in self._tag_card_containers:
             self._tag_card_containers[tag.id].border = ft.Border.all(1.5, ft.Colors.CYAN_400)
+            try:
+                self._tag_card_containers[tag.id].update()
+            except Exception:
+                pass
 
-        self.page.update()
+        try:
+            self.right_panel_barrier.update()
+            self.right_panel_container.update()
+        except Exception:
+            self.page.update()
+
+        self._scroll_to_tag(tag.id)
 
     def open_right_panel(self, task: Task) -> None:
         """Open the translucent right panel with editable task description and properties."""
         prev_id = self.selected_task_id
         self.right_panel_mode = "task"
         self.selected_task_id = task.id
+        self._last_selected_task_id = task.id
         self.selected_tag_id = None
         self.right_panel_open = True
         w = getattr(self.page, "width", 1000) or 1000
@@ -3166,25 +3276,57 @@ class ScheduleScreen:
 
         if prev_id and prev_id in self._task_card_containers:
             self._task_card_containers[prev_id].border = None
+            try:
+                self._task_card_containers[prev_id].update()
+            except Exception:
+                pass
         if task.id in self._task_card_containers:
             self._task_card_containers[task.id].border = ft.Border.all(1.5, ft.Colors.CYAN_400)
+            try:
+                self._task_card_containers[task.id].update()
+            except Exception:
+                pass
 
-        self.page.update()
+        try:
+            self.right_panel_barrier.update()
+            self.right_panel_container.update()
+        except Exception:
+            self.page.update()
+
+        self._scroll_to_task(task.id)
 
     def close_right_panel(self) -> None:
         """Close the right overlay panel."""
         self.right_panel_open = False
-        if self.selected_task_id and self.selected_task_id in self._task_card_containers:
-            self._task_card_containers[self.selected_task_id].border = None
-        if self.selected_tag_id and self.selected_tag_id in self._tag_card_containers:
-            self._tag_card_containers[self.selected_tag_id].border = None
+        prev_task_id = self.selected_task_id
+        prev_tag_id = self.selected_tag_id
+        if prev_task_id and prev_task_id in self._task_card_containers:
+            self._task_card_containers[prev_task_id].border = None
+            try:
+                self._task_card_containers[prev_task_id].update()
+            except Exception:
+                pass
+        if prev_tag_id and prev_tag_id in self._tag_card_containers:
+            self._tag_card_containers[prev_tag_id].border = None
+            try:
+                self._tag_card_containers[prev_tag_id].update()
+            except Exception:
+                pass
+        if prev_task_id:
+            self._last_selected_task_id = prev_task_id
+        if prev_tag_id:
+            self._last_selected_tag_id = prev_tag_id
         self.selected_task_id = None
         self.selected_tag_id = None
         self.right_panel_barrier.visible = False
         self.right_panel_barrier.opacity = 0.0
         self.right_panel_container.visible = False
         self.right_panel_container.opacity = 0.0
-        self.page.update()
+        try:
+            self.right_panel_barrier.update()
+            self.right_panel_container.update()
+        except Exception:
+            self.page.update()
 
     def toggle_right_panel(self, task: Task | None = None, tag: Subject | None = None) -> None:
         """Toggle right panel visibility for tasks or tags."""
@@ -3197,9 +3339,15 @@ class ScheduleScreen:
                 self.open_right_panel(task)
             elif self.current_tab == 2:
                 # In tags tab: open tag panel
-                tags = self.task_manager.get_all_subjects()
-                if tags:
-                    self.open_right_tag_panel(tags[0])
+                target_tag = None
+                last_tag_id = getattr(self, "_last_selected_tag_id", None) or self.selected_tag_id
+                if last_tag_id:
+                    target_tag = self.task_manager.get_subject_by_id(last_tag_id)
+                if not target_tag:
+                    tags = self.task_manager.get_all_subjects()
+                    target_tag = tags[0] if tags else None
+                if target_tag:
+                    self.open_right_tag_panel(target_tag)
                 else:
                     self.right_panel_mode = "tag"
                     self.right_panel_open = True
@@ -3208,9 +3356,14 @@ class ScheduleScreen:
                     self.right_panel_container.visible = True
                     self.right_panel_container.opacity = 1.0
                     self._render_right_tag_panel_content(None)
-                    self.page.update()
-            elif self.selected_task_id:
-                t = self.task_manager.get_task_by_id(self.selected_task_id)
+                    try:
+                        self.right_panel_barrier.update()
+                        self.right_panel_container.update()
+                    except Exception:
+                        self.page.update()
+            elif self.selected_task_id or getattr(self, "_last_selected_task_id", None):
+                target_id = self.selected_task_id or self._last_selected_task_id
+                t = self.task_manager.get_task_by_id(target_id)
                 if t:
                     self.open_right_panel(t)
                     return
@@ -3230,7 +3383,11 @@ class ScheduleScreen:
                         self.right_panel_container.visible = True
                         self.right_panel_container.opacity = 1.0
                         self._render_right_panel_content(None)
-                        self.page.update()
+                        try:
+                            self.right_panel_barrier.update()
+                            self.right_panel_container.update()
+                        except Exception:
+                            self.page.update()
 
     # ──────────────────────────────────────────
     # Rendering & View Updates
@@ -3251,12 +3408,13 @@ class ScheduleScreen:
             else:
                 inner = self._render_archive_view()
 
-            # Wrap in full-size top-left pinned container to ensure zero resize/centering jitter
+            # Keep stable container key for the tab so AnimatedSwitcher smoothly transitions
+            # between different tabs without destroying and resetting the scroll position on same-tab data reload.
             view = ft.Container(
                 content=inner,
                 expand=True,
                 alignment=ft.Alignment(-1, -1),
-                key=f"tab_view_{tab_idx}_v{self._tab_versions[tab_idx]}",
+                key=f"tab_view_{tab_idx}",
             )
             self._tab_views[tab_idx] = view
             self._dirty_tabs.discard(tab_idx)
@@ -3327,6 +3485,9 @@ class ScheduleScreen:
 
     def refresh(self) -> None:
         """Reload data for the active view, update sidebar and page."""
+        target_task_id = self.selected_task_id or getattr(self, "_last_selected_task_id", None)
+        target_tag_id = self.selected_tag_id or getattr(self, "_last_selected_tag_id", None)
+
         self._dirty_tabs = {0, 1, 2, 3}
         self._task_card_containers.clear()
         self._tag_card_containers.clear()
@@ -3335,6 +3496,12 @@ class ScheduleScreen:
         self._render_content()
         self.page.update()
         gc.collect(1)
+
+        # Restore scroll position to the task/tag being edited
+        if target_task_id and self.current_tab in (0, 1, 3):
+            self._scroll_to_task(target_task_id)
+        elif target_tag_id and self.current_tab == 2:
+            self._scroll_to_tag(target_tag_id)
 
     # ──────────────────────────────────────────
     # Dialog Handlers
@@ -3345,6 +3512,9 @@ class ScheduleScreen:
 
     def open_edit_dialog(self, task: Task) -> None:
         """Open the task editing dialog."""
+        self.selected_task_id = task.id
+        self._last_selected_task_id = task.id
+        self._scroll_to_task(task.id)
         open_task_edit_dialog(self.page, task=task, on_success=self.refresh)
 
     def open_complete_dialog(
@@ -3495,6 +3665,9 @@ class ScheduleScreen:
 
     def open_edit_tag_dialog(self, tag: Subject) -> None:
         """Open dialog to edit an existing tag/subject."""
+        self.selected_tag_id = tag.id
+        self._last_selected_tag_id = tag.id
+        self._scroll_to_tag(tag.id)
         open_tag_dialog(self.page, tag=tag, on_success=self.refresh)
 
     def confirm_delete_tag(self, tag: Subject, task_count: int) -> None:
