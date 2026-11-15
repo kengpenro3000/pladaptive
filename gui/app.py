@@ -689,12 +689,39 @@ class ScheduleScreen:
     # ──────────────────────────────────────────
     # Tab 0: Today's Tasks
     # ──────────────────────────────────────────
+    def _build_completed_divider(self, completed_count: int) -> ft.Control:
+        """Build a straight horizontal dividing line separating uncompleted and completed tasks."""
+        return ft.Container(
+            padding=ft.Padding(left=0, top=14, right=0, bottom=6),
+            content=ft.Column(
+                spacing=8,
+                controls=[
+                    ft.Divider(height=2, thickness=2, color=ft.Colors.OUTLINE),
+                    ft.Row(
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=ft.Colors.GREEN_400),
+                            ft.Text(
+                                f"Завершенные сегодня задачи ({completed_count})",
+                                size=12,
+                                weight=ft.FontWeight.BOLD,
+                                color=ft.Colors.GREY_400,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        )
+
     def load_today_tasks(self) -> None:
         """Fetch prioritized tasks scheduled for today (including completed today) and populate column."""
         self.today_tasks_column.controls.clear()
         scored_tasks = self.scheduler.get_prioritized_tasks(only_today=True)
 
-        if not scored_tasks:
+        active_tasks = [s for s in scored_tasks if s.task.status != TaskStatus.COMPLETED]
+        completed_tasks = [s for s in scored_tasks if s.task.status == TaskStatus.COMPLETED]
+
+        if not active_tasks and not completed_tasks:
             self.today_tasks_column.controls.append(
                 ft.Card(
                     elevation=1,
@@ -732,14 +759,36 @@ class ScheduleScreen:
                     ),
                 )
             )
-        else:
-            active_rank = 1
-            for scored in scored_tasks:
-                if scored.task.status != TaskStatus.COMPLETED:
-                    self.today_tasks_column.controls.append(self.build_task_card(scored, active_rank))
-                    active_rank += 1
-                else:
-                    self.today_tasks_column.controls.append(self.build_task_card(scored, 0))
+            return
+
+        # 1. Add active uncompleted tasks
+        if active_tasks:
+            for rank, scored in enumerate(active_tasks, 1):
+                self.today_tasks_column.controls.append(self.build_task_card(scored, rank))
+        elif completed_tasks:
+            self.today_tasks_column.controls.append(
+                ft.Card(
+                    elevation=1,
+                    content=ft.Container(
+                        padding=20,
+                        alignment=ft.Alignment(0, 0),
+                        content=ft.Row(
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=10,
+                            controls=[
+                                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=ft.Colors.GREEN_400, size=24),
+                                ft.Text("Все активные задачи на сегодня выполнены!", size=15, weight=ft.FontWeight.BOLD),
+                            ],
+                        ),
+                    ),
+                )
+            )
+
+        # 2. Add straight divider line and completed tasks
+        if completed_tasks:
+            self.today_tasks_column.controls.append(self._build_completed_divider(len(completed_tasks)))
+            for scored in completed_tasks:
+                self.today_tasks_column.controls.append(self.build_task_card(scored, 0))
 
     def _render_today_tasks_view(self) -> ft.Control:
         """Build the 'Сегодняшние задачи' view."""
@@ -819,7 +868,10 @@ class ScheduleScreen:
         self.all_tasks_column.controls.clear()
         scored_tasks = self.scheduler.get_prioritized_tasks(only_today=False)
 
-        if not scored_tasks:
+        active_tasks = [s for s in scored_tasks if s.task.status != TaskStatus.COMPLETED]
+        completed_tasks = [s for s in scored_tasks if s.task.status == TaskStatus.COMPLETED]
+
+        if not active_tasks and not completed_tasks:
             self.all_tasks_column.controls.append(
                 ft.Card(
                     elevation=1,
@@ -851,14 +903,36 @@ class ScheduleScreen:
                     ),
                 )
             )
-        else:
-            active_rank = 1
-            for scored in scored_tasks:
-                if scored.task.status != TaskStatus.COMPLETED:
-                    self.all_tasks_column.controls.append(self.build_task_card(scored, active_rank))
-                    active_rank += 1
-                else:
-                    self.all_tasks_column.controls.append(self.build_task_card(scored, 0))
+            return
+
+        # 1. Add active uncompleted tasks
+        if active_tasks:
+            for rank, scored in enumerate(active_tasks, 1):
+                self.all_tasks_column.controls.append(self.build_task_card(scored, rank))
+        elif completed_tasks:
+            self.all_tasks_column.controls.append(
+                ft.Card(
+                    elevation=1,
+                    content=ft.Container(
+                        padding=20,
+                        alignment=ft.Alignment(0, 0),
+                        content=ft.Row(
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=10,
+                            controls=[
+                                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=ft.Colors.GREEN_400, size=24),
+                                ft.Text("Все активные задачи выполнены!", size=15, weight=ft.FontWeight.BOLD),
+                            ],
+                        ),
+                    ),
+                )
+            )
+
+        # 2. Add straight divider line and completed tasks
+        if completed_tasks:
+            self.all_tasks_column.controls.append(self._build_completed_divider(len(completed_tasks)))
+            for scored in completed_tasks:
+                self.all_tasks_column.controls.append(self.build_task_card(scored, 0))
 
     def _render_all_tasks_view(self) -> ft.Control:
         """Build the 'Все задачи' view."""
