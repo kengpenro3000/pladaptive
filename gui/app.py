@@ -46,6 +46,12 @@ FilledBtn = getattr(ft, "FilledButton", getattr(ft, "ElevatedButton", ft.TextBut
 class ScheduleScreen:
     """Renders and manages the main application view with sidebar and tabbed content."""
 
+    MIN_SIDEBAR_WIDTH = 180
+    MAX_SIDEBAR_WIDTH = 550
+    COLLAPSED_SIDEBAR_WIDTH = 68
+    DEFAULT_EXPANDED_WIDTH = 260
+    COLLAPSE_THRESHOLD = 130
+
     MONTHS_RU = [
         "", "января", "февраля", "марта", "апреля", "мая", "июня",
         "июля", "августа", "сентября", "октября", "ноября", "декабря"
@@ -62,13 +68,17 @@ class ScheduleScreen:
         # Active tab: 0 = Today's tasks, 1 = All tasks, 2 = Tags
         self.current_tab = 0
         self.sidebar_collapsed = False
+        self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
 
         # Containers
         self.today_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.all_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.tags_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.content_area = ft.Container(expand=True)
-        self.sidebar_area = ft.Container(width=260, animate_size=200)
+        self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
+
+        # Resizer handle between sidebar and content
+        self.resizer_handle = self._build_resizer_handle()
 
     # ──────────────────────────────────────────
     # Priority & Formatting Helpers
@@ -191,12 +201,105 @@ class ScheduleScreen:
             )
 
     # ──────────────────────────────────────────
-    # Sidebar Builder
+    # Sidebar Resizer & Builder (Zed-style)
     # ──────────────────────────────────────────
+    def _build_resizer_handle(self) -> ft.Control:
+        """Create the resizer divider bar with drag detection, hover glow, and double-tap toggle."""
+        self.resizer_line = ft.Container(
+            width=2,
+            bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT),
+            border_radius=1,
+        )
+
+        def _on_hover(e: ft.HoverEvent) -> None:
+            is_hovered = str(getattr(e, "data", "")).lower() == "true" or getattr(e, "data", None) is True
+            self.resizer_line.bgcolor = (
+                ft.Colors.PRIMARY if is_hovered else ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT)
+            )
+            self.resizer_line.width = 3 if is_hovered else 2
+            self.page.update()
+
+        return ft.GestureDetector(
+            mouse_cursor=ft.MouseCursor.RESIZE_LEFT_RIGHT,
+            on_pan_start=self._on_resizer_pan_start,
+            on_pan_update=self._on_resizer_pan_update,
+            on_double_tap=self._on_resizer_double_tap,
+            content=ft.Container(
+                width=10,
+                alignment=ft.Alignment(0, 0),
+                on_hover=_on_hover,
+                content=self.resizer_line,
+            ),
+        )
+
+    def _on_resizer_pan_start(self, e: ft.DragStartEvent) -> None:
+        """Disable animation during manual drag for immediate 1:1 response."""
+        self.sidebar_area.animate_size = None
+
+    def _on_resizer_pan_update(self, e: ft.DragUpdateEvent) -> None:
+        """Adjust sidebar width smoothly as user drags horizontally."""
+        dx = 0.0
+        if hasattr(e, "delta_x") and e.delta_x is not None:
+            dx = e.delta_x
+        elif getattr(e, "local_delta", None) is not None and hasattr(e.local_delta, "x"):
+            dx = e.local_delta.x
+        elif getattr(e, "global_delta", None) is not None and hasattr(e.global_delta, "x"):
+            dx = e.global_delta.x
+        elif getattr(e, "primary_delta", None) is not None:
+            dx = e.primary_delta
+
+        if not dx:
+            return
+
+        current_w = self.sidebar_area.width or self.DEFAULT_EXPANDED_WIDTH
+        new_w = current_w + dx
+
+        if self.sidebar_collapsed:
+            if new_w > self.COLLAPSE_THRESHOLD:
+                self.sidebar_collapsed = False
+                expanded_w = max(self.MIN_SIDEBAR_WIDTH, min(new_w, self.MAX_SIDEBAR_WIDTH))
+                self.saved_expanded_width = expanded_w
+                self.sidebar_area.width = expanded_w
+                self._render_sidebar()
+                self.page.update()
+        else:
+            if new_w < self.COLLAPSE_THRESHOLD:
+                self.sidebar_collapsed = True
+                self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+                self._render_sidebar()
+                self.page.update()
+            else:
+                clamped_w = max(self.MIN_SIDEBAR_WIDTH, min(new_w, self.MAX_SIDEBAR_WIDTH))
+                if clamped_w != current_w:
+                    self.saved_expanded_width = clamped_w
+                    self.sidebar_area.width = clamped_w
+                    self.page.update()
+
+    def _on_resizer_double_tap(self, e: ft.ControlEvent) -> None:
+        """Double tap resets to default expanded width or toggles collapsed state."""
+        self.sidebar_area.animate_size = 200
+        if self.sidebar_collapsed:
+            self.sidebar_collapsed = False
+            self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
+            self.sidebar_area.width = self.DEFAULT_EXPANDED_WIDTH
+        else:
+            if self.sidebar_area.width != self.DEFAULT_EXPANDED_WIDTH:
+                self.saved_expanded_width = self.DEFAULT_EXPANDED_WIDTH
+                self.sidebar_area.width = self.DEFAULT_EXPANDED_WIDTH
+            else:
+                self.sidebar_collapsed = True
+                self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+        self._render_sidebar()
+        self.page.update()
+
     def toggle_sidebar(self) -> None:
         """Toggle sidebar between collapsed (icons only) and expanded."""
         self.sidebar_collapsed = not self.sidebar_collapsed
-        self.sidebar_area.width = 68 if self.sidebar_collapsed else 260
+        self.sidebar_area.animate_size = 200
+        if self.sidebar_collapsed:
+            self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+        else:
+            self.sidebar_area.width = max(self.MIN_SIDEBAR_WIDTH, self.saved_expanded_width)
         self._render_sidebar()
         self.page.update()
 
@@ -1263,9 +1366,11 @@ class ScheduleScreen:
         self.page.add(
             ft.Row(
                 expand=True,
-                spacing=16,
+                spacing=0,
                 controls=[
                     self.sidebar_area,
+                    self.resizer_handle,
+                    ft.Container(width=10),
                     self.content_area,
                 ],
             )
