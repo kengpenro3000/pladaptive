@@ -99,12 +99,12 @@ class ScheduleScreen:
         self.tags_column = ft.ListView(spacing=8, expand=True)
         self.archive_column = ft.ListView(spacing=8, expand=True)
 
-        # Main content area with fast animated transition switcher (150ms symmetric fade) to hide page loads without jitter
+        # Main content area with smooth animated transition switcher (300ms symmetric fade) to hide page loads without jitter
         self.content_area = ft.AnimatedSwitcher(
             content=ft.Container(expand=True),
             transition=ft.AnimatedSwitcherTransition.FADE,
-            duration=150,
-            reverse_duration=150,
+            duration=300,
+            reverse_duration=300,
             switch_in_curve=ft.AnimationCurve.EASE_OUT,
             switch_out_curve=ft.AnimationCurve.EASE_OUT,
             expand=True,
@@ -566,7 +566,7 @@ class ScheduleScreen:
                     alignment=ft.Alignment(0, 0),
                     tooltip=f"{title} ({badge_text})" if badge_text else title,
                     ink=True,
-                    animate=150,
+                    animate=250,
                     on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
                 )
 
@@ -608,7 +608,7 @@ class ScheduleScreen:
                 border_radius=10,
                 padding=ft.Padding(left=12, top=10, right=12, bottom=10),
                 ink=True,
-                animate=150,
+                animate=250,
                 on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
             )
 
@@ -2478,7 +2478,7 @@ class ScheduleScreen:
             width=self.right_panel_width,
             visible=False,
             opacity=0.0,
-            animate_opacity=150,
+            animate_opacity=250,
             bgcolor=ft.Colors.with_opacity(0.70, "#161822"),
             blur=ft.Blur(20, 20, ft.BlurTileMode.CLAMP),
             border=ft.Border(
@@ -2505,7 +2505,7 @@ class ScheduleScreen:
             bottom=0,
             visible=False,
             opacity=0.0,
-            animate_opacity=150,
+            animate_opacity=250,
             bgcolor=ft.Colors.with_opacity(0.35, ft.Colors.BLACK),
             blur=ft.Blur(4, 4, ft.BlurTileMode.CLAMP),
             on_click=lambda _: self.close_right_panel(),
