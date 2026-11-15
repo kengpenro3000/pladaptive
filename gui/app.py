@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 from datetime import date, datetime
 from pathlib import Path
+import re
 
 # Ensure root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -999,14 +1000,144 @@ class ScheduleScreen:
             ],
         )
 
-        # 2. Time selector
-        cur_mins = int(self._last_expected_minutes or "60")
+        # 2. Time selector with presets and custom time input dialog
+        TIME_PRESETS = [
+            (15, "15 мин"),
+            (25, "25 мин (Помодоро)"),
+            (30, "30 мин"),
+            (45, "45 мин"),
+            (60, "60 мин (1 ч)"),
+            (90, "90 мин (1.5 ч)"),
+            (120, "120 мин (2 ч)"),
+            (180, "180 мин (3 ч)"),
+        ]
+
+        def _open_custom_time_dialog() -> None:
+            time_input = ft.TextField(
+                label="Время (минуты)",
+                value=str(self._last_expected_minutes or "60"),
+                suffix=ft.Text("мин"),
+                keyboard_type=ft.KeyboardType.NUMBER,
+                input_filter=ft.NumbersOnlyInputFilter(),
+                autofocus=True,
+                dense=True,
+                width=240,
+                on_submit=lambda _: _save_custom_time(),
+            )
+
+            def _apply_chip(m: int) -> None:
+                time_input.value = str(m)
+                time_input.error_text = None
+                self.page.update()
+
+            chips = [
+                ft.Chip(
+                    label=ft.Text(f"{m} мин"),
+                    on_click=lambda _, m=m: _apply_chip(m),
+                )
+                for m in [15, 20, 25, 35, 40, 50, 75, 100, 150]
+            ]
+
+            def _save_custom_time(e: ft.ControlEvent | None = None) -> None:
+                raw = (time_input.value or "").strip()
+                if not raw or not raw.isdigit() or int(raw) <= 0:
+                    time_input.error_text = "Введите число минут (> 0)"
+                    self.page.update()
+                    return
+                mins = int(raw)
+                _close_dialog(self.page, custom_dialog)
+                _set_time(mins)
+                self._focus_control(self._quick_add_name_field)
+
+            custom_dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Row(
+                    [
+                        ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, color=ft.Colors.PRIMARY, size=22),
+                        ft.Text("Своё время на задачу", weight=ft.FontWeight.BOLD, size=16),
+                    ],
+                    spacing=8,
+                ),
+                content=ft.Column(
+                    tight=True,
+                    spacing=12,
+                    controls=[
+                        ft.Text("Укажите число минут или выберите быстрый вариант:", size=13, color=ft.Colors.OUTLINE),
+                        time_input,
+                        ft.Row(wrap=True, spacing=6, controls=chips),
+                    ],
+                ),
+                actions=[
+                    ft.TextButton("Отмена", on_click=lambda _: _close_dialog(self.page, custom_dialog)),
+                    FilledBtn("Применить", icon=ft.Icons.CHECK_ROUNDED, on_click=_save_custom_time),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            _show_dialog(self.page, custom_dialog)
+            self._focus_control(time_input)
+
+        def _build_time_items() -> list[ft.PopupMenuItem]:
+            mins_val = int(self._last_expected_minutes or "60")
+            preset_mins = [p[0] for p in TIME_PRESETS]
+
+            items: list[ft.PopupMenuItem] = [
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.EDIT_ROUNDED, size=16, color=ft.Colors.PRIMARY),
+                            ft.Text("Своё время...", size=13, weight=ft.FontWeight.W_500),
+                        ],
+                        spacing=8,
+                    ),
+                    on_click=lambda _: _open_custom_time_dialog(),
+                ),
+            ]
+
+            if mins_val not in preset_mins:
+                items.append(
+                    ft.PopupMenuItem(
+                        content=ft.Row(
+                            [
+                                ft.Icon(ft.Icons.CHECK_ROUNDED, size=15, color=ft.Colors.GREEN_400),
+                                ft.Text(f"{mins_val} мин (выбрано)", size=13, weight=ft.FontWeight.BOLD),
+                            ],
+                            spacing=8,
+                        ),
+                        on_click=lambda _, m=mins_val: _set_time(m),
+                    )
+                )
+
+            for m, label in TIME_PRESETS:
+                is_selected = (m == mins_val)
+                items.append(
+                    ft.PopupMenuItem(
+                        content=ft.Row(
+                            [
+                                ft.Icon(
+                                    ft.Icons.CHECK_ROUNDED if is_selected else ft.Icons.ACCESS_TIME_ROUNDED,
+                                    size=15,
+                                    color=ft.Colors.GREEN_400 if is_selected else ft.Colors.OUTLINE,
+                                ),
+                                ft.Text(
+                                    label,
+                                    size=13,
+                                    weight=ft.FontWeight.BOLD if is_selected else ft.FontWeight.NORMAL,
+                                ),
+                            ],
+                            spacing=8,
+                        ),
+                        on_click=lambda _, m=m: _set_time(m),
+                    )
+                )
+            return items
 
         def _set_time(mins: int) -> None:
             self._last_expected_minutes = str(mins)
             time_btn.tooltip = f"Время: {mins} мин (нажмите для выбора)"
+            time_btn.items = _build_time_items()
             self.page.update()
 
+        cur_mins = int(self._last_expected_minutes or "60")
         time_btn = ft.PopupMenuButton(
             content=ft.Container(
                 content=ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=20, color=ft.Colors.PRIMARY),
@@ -1015,15 +1146,7 @@ class ScheduleScreen:
                 ink=True,
             ),
             tooltip=f"Время: {cur_mins} мин (нажмите для выбора)",
-            items=[
-                ft.PopupMenuItem(content=ft.Text("⏱️ 15 мин"), on_click=lambda _: _set_time(15)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 30 мин"), on_click=lambda _: _set_time(30)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 45 мин"), on_click=lambda _: _set_time(45)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 60 мин (1 ч)"), on_click=lambda _: _set_time(60)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 90 мин (1.5 ч)"), on_click=lambda _: _set_time(90)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 120 мин (2 ч)"), on_click=lambda _: _set_time(120)),
-                ft.PopupMenuItem(content=ft.Text("⏱️ 180 мин (3 ч)"), on_click=lambda _: _set_time(180)),
-            ],
+            items=_build_time_items(),
         )
 
         # 3. Priority / Difficulty rating
@@ -1154,9 +1277,25 @@ class ScheduleScreen:
                 _show_snack(self.page, "Сначала выберите или создайте тег!", bgcolor=ft.Colors.AMBER_800)
                 return
 
-            # Time
+            # Time: check inline time in title (e.g. "Задача 45м", "Доклад 1.5ч", "~25m") or quick-add time selector
+            inline_time_match = re.search(
+                r"\s+(?:~|@)?(\d+(?:\.\d+)?)\s*(мин|минут|минуты|м|m|min|mins|minutes|ч|час|часа|часов|h|hr|hrs)\s*$",
+                title,
+                re.IGNORECASE,
+            )
             time_val = 60.0
-            if self._last_expected_minutes:
+            if inline_time_match:
+                parsed_num = float(inline_time_match.group(1))
+                parsed_unit = inline_time_match.group(2).lower()
+                clean_title = title[:inline_time_match.start()].strip()
+                if clean_title:
+                    title = clean_title
+                    time_val = (parsed_num * 60.0) if any(u in parsed_unit for u in ["ч", "h"]) else parsed_num
+                    mins_int = int(time_val) if time_val.is_integer() else round(time_val, 1)
+                    self._last_expected_minutes = str(mins_int)
+                    time_btn.tooltip = f"Время: {mins_int} мин (нажмите для выбора)"
+                    time_btn.items = _build_time_items()
+            elif self._last_expected_minutes:
                 try:
                     time_val = float(self._last_expected_minutes)
                 except ValueError:
