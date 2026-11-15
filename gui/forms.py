@@ -111,6 +111,8 @@ class TaskCreateDialog:
             label="Название задачи*",
             hint_text="Например: Решить домашку по матанализу",
             autofocus=True,
+            dense=True,
+            text_size=13,
         )
 
         subjects = self.task_manager.get_all_subjects()
@@ -123,13 +125,17 @@ class TaskCreateDialog:
             hint_text="Выберите тег",
             options=subject_options,
             value=subject_options[0].key if subject_options else None,
+            dense=True,
+            text_size=13,
         )
 
         self.time_field = ft.TextField(
-            label="Ожидаемое время (в минутах)*",
+            label="Время (мин)*",
             hint_text="Например: 90",
             input_filter=ft.NumbersOnlyInputFilter(),
             keyboard_type=ft.KeyboardType.NUMBER,
+            dense=True,
+            text_size=13,
         )
 
         self.priority_dropdown = ft.Dropdown(
@@ -141,14 +147,17 @@ class TaskCreateDialog:
                 ft.dropdown.Option(key=TaskPriority.HIGH.value, text="Высокий (High)"),
                 ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="Критический (Critical)"),
             ],
+            dense=True,
+            text_size=13,
         )
 
         today_str = date.today().strftime("%Y-%m-%d")
         self.scheduled_date_field = ft.TextField(
-            label="Запланировано на день",
+            label="План на день",
             value=today_str,
-            hint_text="ГГГГ-ММ-ДД (например: 2026-11-15)",
-            icon=ft.Icons.EVENT_ROUNDED,
+            hint_text="ГГГГ-ММ-ДД",
+            dense=True,
+            text_size=13,
         )
 
         self.sched_date_picker = ft.DatePicker(
@@ -160,24 +169,37 @@ class TaskCreateDialog:
 
         self.scheduled_date_field.suffix = ft.IconButton(
             icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
-            tooltip="Выбрать день в календаре",
+            icon_size=18,
+            tooltip="Выбрать в календаре",
             on_click=lambda _: self._open_sched_calendar(),
         )
 
+        def _quick_btn(label: str, target_date: date | None) -> ft.Container:
+            return ft.Container(
+                content=ft.Text(label, size=11, color=ft.Colors.PRIMARY, weight=ft.FontWeight.W_500),
+                bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY),
+                padding=ft.Padding(left=6, top=3, right=6, bottom=3),
+                border_radius=6,
+                ink=True,
+                on_click=lambda _: self._set_sched_date(target_date),
+            )
+
         quick_sched_chips = ft.Row(
-            spacing=6,
+            spacing=4,
+            wrap=True,
             controls=[
-                ft.TextButton("Сегодня", on_click=lambda _: self._set_sched_date(date.today())),
-                ft.TextButton("Завтра", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=1))),
-                ft.TextButton("Через 3 дня", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=3))),
-                ft.TextButton("Без даты", on_click=lambda _: self._set_sched_date(None)),
+                _quick_btn("Сегодня", date.today()),
+                _quick_btn("Завтра", date.today() + timedelta(days=1)),
+                _quick_btn("+3 дня", date.today() + timedelta(days=3)),
+                _quick_btn("Сброс", None),
             ],
         )
 
         self.deadline_field = ft.TextField(
             label="Дедлайн (необязательно)",
-            hint_text="ГГГГ-ММ-ДД (например: 2026-12-01)",
-            icon=ft.Icons.SCHEDULE_ROUNDED,
+            hint_text="ГГГГ-ММ-ДД",
+            dense=True,
+            text_size=13,
         )
 
         self.date_picker = ft.DatePicker(
@@ -188,6 +210,7 @@ class TaskCreateDialog:
 
         self.deadline_field.suffix = ft.IconButton(
             icon=ft.Icons.CALENDAR_TODAY_ROUNDED,
+            icon_size=18,
             tooltip="Выбрать дату в календаре",
             on_click=lambda _: self._open_calendar(),
         )
@@ -198,24 +221,50 @@ class TaskCreateDialog:
         self.dialog = ft.AlertDialog(
             title=ft.Row(
                 controls=[
-                    ft.Icon(ft.Icons.ADD_TASK_ROUNDED, color=ft.Colors.PRIMARY, size=26),
-                    ft.Text("Новая задача", weight=ft.FontWeight.BOLD, size=20),
+                    ft.Icon(ft.Icons.ADD_TASK_ROUNDED, color=ft.Colors.PRIMARY, size=20),
+                    ft.Text("Новая задача", weight=ft.FontWeight.BOLD, size=16),
                 ],
-                spacing=10,
+                spacing=8,
             ),
             content=ft.Container(
-                width=480,
+                width=420,
                 content=ft.Column(
                     tight=True,
-                    spacing=12,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
                     controls=[
                         self.name_field,
-                        self.subject_dropdown,
-                        self.time_field,
-                        self.priority_dropdown,
-                        self.scheduled_date_field,
-                        quick_sched_chips,
-                        self.deadline_field,
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Container(content=self.subject_dropdown, expand=1),
+                                ft.Container(content=self.priority_dropdown, expand=1),
+                            ],
+                        ),
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Container(content=self.time_field, expand=1),
+                                ft.Container(content=self.scheduled_date_field, expand=1),
+                            ],
+                        ),
+                        ft.Row(
+                            spacing=8,
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            controls=[
+                                ft.Container(content=self.deadline_field, expand=1),
+                                ft.Container(
+                                    content=ft.Column(
+                                        spacing=2,
+                                        controls=[
+                                            ft.Text("Быстрый план:", size=11, color=ft.Colors.GREY_400),
+                                            quick_sched_chips,
+                                        ],
+                                    ),
+                                    expand=1,
+                                ),
+                            ],
+                        ),
                     ],
                 ),
             ),
@@ -430,6 +479,8 @@ class TaskEditDialog:
             value=task.name,
             hint_text="Например: Решить домашку по матанализу",
             autofocus=True,
+            dense=True,
+            text_size=13,
         )
 
         subjects = self.task_manager.get_all_subjects()
@@ -442,6 +493,8 @@ class TaskEditDialog:
             hint_text="Выберите тег",
             options=subject_options,
             value=str(task.subject_id),
+            dense=True,
+            text_size=13,
         )
 
         initial_minutes = ""
@@ -450,11 +503,13 @@ class TaskEditDialog:
             initial_minutes = str(int(r)) if r.is_integer() else f"{r:.1f}"
 
         self.time_field = ft.TextField(
-            label="Ожидаемое время (в минутах)*",
+            label="Время (мин)*",
             value=initial_minutes,
             hint_text="Например: 90",
             input_filter=ft.NumbersOnlyInputFilter(),
             keyboard_type=ft.KeyboardType.NUMBER,
+            dense=True,
+            text_size=13,
         )
 
         self.priority_dropdown = ft.Dropdown(
@@ -466,14 +521,17 @@ class TaskEditDialog:
                 ft.dropdown.Option(key=TaskPriority.HIGH.value, text="Высокий (High)"),
                 ft.dropdown.Option(key=TaskPriority.CRITICAL.value, text="Критический (Critical)"),
             ],
+            dense=True,
+            text_size=13,
         )
 
         initial_sched = task.scheduled_date.strftime("%Y-%m-%d") if getattr(task, "scheduled_date", None) else ""
         self.scheduled_date_field = ft.TextField(
-            label="Запланировано на день",
+            label="План на день",
             value=initial_sched,
-            hint_text="ГГГГ-ММ-ДД (например: 2026-11-15)",
-            icon=ft.Icons.EVENT_ROUNDED,
+            hint_text="ГГГГ-ММ-ДД",
+            dense=True,
+            text_size=13,
         )
 
         self.sched_date_picker = ft.DatePicker(
@@ -485,17 +543,29 @@ class TaskEditDialog:
 
         self.scheduled_date_field.suffix = ft.IconButton(
             icon=ft.Icons.CALENDAR_MONTH_ROUNDED,
-            tooltip="Выбрать день в календаре",
+            icon_size=18,
+            tooltip="Выбрать в календаре",
             on_click=lambda _: self._open_sched_calendar(),
         )
 
+        def _quick_btn(label: str, target_date: date | None) -> ft.Container:
+            return ft.Container(
+                content=ft.Text(label, size=11, color=ft.Colors.PRIMARY, weight=ft.FontWeight.W_500),
+                bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY),
+                padding=ft.Padding(left=6, top=3, right=6, bottom=3),
+                border_radius=6,
+                ink=True,
+                on_click=lambda _: self._set_sched_date(target_date),
+            )
+
         quick_sched_chips = ft.Row(
-            spacing=6,
+            spacing=4,
+            wrap=True,
             controls=[
-                ft.TextButton("Сегодня", on_click=lambda _: self._set_sched_date(date.today())),
-                ft.TextButton("Завтра", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=1))),
-                ft.TextButton("Через 3 дня", on_click=lambda _: self._set_sched_date(date.today() + timedelta(days=3))),
-                ft.TextButton("Без даты", on_click=lambda _: self._set_sched_date(None)),
+                _quick_btn("Сегодня", date.today()),
+                _quick_btn("Завтра", date.today() + timedelta(days=1)),
+                _quick_btn("+3 дня", date.today() + timedelta(days=3)),
+                _quick_btn("Сброс", None),
             ],
         )
 
@@ -503,8 +573,9 @@ class TaskEditDialog:
         self.deadline_field = ft.TextField(
             label="Дедлайн (необязательно)",
             value=initial_deadline,
-            hint_text="ГГГГ-ММ-ДД (например: 2026-12-01)",
-            icon=ft.Icons.SCHEDULE_ROUNDED,
+            hint_text="ГГГГ-ММ-ДД",
+            dense=True,
+            text_size=13,
         )
 
         self.date_picker = ft.DatePicker(
@@ -516,6 +587,7 @@ class TaskEditDialog:
 
         self.deadline_field.suffix = ft.IconButton(
             icon=ft.Icons.CALENDAR_TODAY_ROUNDED,
+            icon_size=18,
             tooltip="Выбрать дату в календаре",
             on_click=lambda _: self._open_calendar(),
         )
@@ -526,24 +598,50 @@ class TaskEditDialog:
         self.dialog = ft.AlertDialog(
             title=ft.Row(
                 controls=[
-                    ft.Icon(ft.Icons.EDIT_NOTE_ROUNDED, color=ft.Colors.PRIMARY, size=26),
-                    ft.Text("Редактирование задачи", weight=ft.FontWeight.BOLD, size=20),
+                    ft.Icon(ft.Icons.EDIT_NOTE_ROUNDED, color=ft.Colors.PRIMARY, size=20),
+                    ft.Text("Редактирование задачи", weight=ft.FontWeight.BOLD, size=16),
                 ],
-                spacing=10,
+                spacing=8,
             ),
             content=ft.Container(
-                width=480,
+                width=420,
                 content=ft.Column(
                     tight=True,
-                    spacing=12,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
                     controls=[
                         self.name_field,
-                        self.subject_dropdown,
-                        self.time_field,
-                        self.priority_dropdown,
-                        self.scheduled_date_field,
-                        quick_sched_chips,
-                        self.deadline_field,
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Container(content=self.subject_dropdown, expand=1),
+                                ft.Container(content=self.priority_dropdown, expand=1),
+                            ],
+                        ),
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Container(content=self.time_field, expand=1),
+                                ft.Container(content=self.scheduled_date_field, expand=1),
+                            ],
+                        ),
+                        ft.Row(
+                            spacing=8,
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            controls=[
+                                ft.Container(content=self.deadline_field, expand=1),
+                                ft.Container(
+                                    content=ft.Column(
+                                        spacing=2,
+                                        controls=[
+                                            ft.Text("Быстрый план:", size=11, color=ft.Colors.GREY_400),
+                                            quick_sched_chips,
+                                        ],
+                                    ),
+                                    expand=1,
+                                ),
+                            ],
+                        ),
                     ],
                 ),
             ),
@@ -761,6 +859,8 @@ class TaskCompleteDialog:
             value=default_min,
             hint_text="Например: 45",
             autofocus=True,
+            dense=True,
+            text_size=13,
             input_filter=ft.NumbersOnlyInputFilter(),
             keyboard_type=ft.KeyboardType.NUMBER,
         )
@@ -770,26 +870,26 @@ class TaskCompleteDialog:
         self.dialog = ft.AlertDialog(
             title=ft.Row(
                 controls=[
-                    ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, color=ft.Colors.GREEN_400, size=26),
-                    ft.Text("Завершение задачи", weight=ft.FontWeight.BOLD, size=18),
+                    ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED, color=ft.Colors.GREEN_400, size=20),
+                    ft.Text("Завершение задачи", weight=ft.FontWeight.BOLD, size=16),
                 ],
-                spacing=10,
+                spacing=8,
             ),
             content=ft.Container(
-                width=420,
+                width=380,
                 content=ft.Column(
                     tight=True,
-                    spacing=12,
+                    spacing=8,
                     controls=[
                         ft.Text(
                             f"Задача: {self.task_name}",
                             weight=ft.FontWeight.W_600,
-                            size=14,
+                            size=13,
                             color=ft.Colors.PRIMARY,
                         ),
                         ft.Text(
                             "Сколько минут вы фактически потратили на задачу?",
-                            size=14,
+                            size=13,
                             color=ft.Colors.GREY_300,
                         ),
                         self.time_field,
@@ -900,15 +1000,19 @@ class TagDialog:
             value=tag.name if is_edit else "",
             hint_text="Например: Программирование",
             autofocus=True,
+            dense=True,
+            text_size=13,
             on_change=lambda _: self._update_preview(),
         )
 
         self.icon_field = ft.TextField(
             label="UTF-иконка / Эмодзи*",
             value=tag.icon if is_edit else "🏷️",
-            hint_text="Например: 💻",
+            hint_text="💻",
             max_length=4,
-            width=140,
+            width=130,
+            dense=True,
+            text_size=13,
             on_change=lambda _: self._update_preview(),
         )
 
@@ -917,7 +1021,9 @@ class TagDialog:
             value=tag.color if is_edit else "#4CAF50",
             hint_text="#4CAF50",
             max_length=9,
-            width=180,
+            width=160,
+            dense=True,
+            text_size=13,
             on_change=lambda _: self._update_preview(),
         )
 
@@ -971,16 +1077,17 @@ class TagDialog:
         self.dialog = ft.AlertDialog(
             title=ft.Row(
                 controls=[
-                    ft.Icon(title_icon, color=ft.Colors.PRIMARY, size=26),
-                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=20),
+                    ft.Icon(title_icon, color=ft.Colors.PRIMARY, size=20),
+                    ft.Text(title_text, weight=ft.FontWeight.BOLD, size=16),
                 ],
-                spacing=10,
+                spacing=8,
             ),
             content=ft.Container(
-                width=480,
+                width=420,
                 content=ft.Column(
                     tight=True,
-                    spacing=14,
+                    spacing=10,
+                    scroll=ft.ScrollMode.AUTO,
                     controls=[
                         self.name_field,
                         ft.Row(

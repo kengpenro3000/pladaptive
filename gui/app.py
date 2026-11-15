@@ -72,9 +72,9 @@ class ScheduleScreen:
         self._drag_width = float(self.DEFAULT_EXPANDED_WIDTH)
 
         # Containers
-        self.today_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
-        self.all_tasks_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
-        self.tags_column = ft.Column(spacing=12, scroll=ft.ScrollMode.AUTO)
+        self.today_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        self.all_tasks_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        self.tags_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
         self.content_area = ft.Container(expand=True)
         self.sidebar_area = ft.Container(width=self.DEFAULT_EXPANDED_WIDTH)
 
@@ -586,7 +586,7 @@ class ScheduleScreen:
     # Task Cards Builder
     # ──────────────────────────────────────────
     def build_task_card(self, scored: ScoredTask, rank: int) -> ft.Card:
-        """Render a single prioritized task card.
+        """Render a single compact, responsive task card.
 
         If task is completed today, displays it as crossed out with a checkmark badge
         and an option to restore/reopen.
@@ -623,277 +623,206 @@ class ScheduleScreen:
             except Exception:
                 ai_pred_str = None
 
-        # Dynamic Tag container badge
+        # Compact Tag container badge
         tag_badge = ft.Container(
             content=ft.Row(
-                spacing=5,
+                spacing=4,
                 tight=True,
                 controls=[
-                    ft.Text(tag_icon, size=14),
+                    ft.Text(tag_icon, size=12),
                     ft.Text(
                         tag_name,
-                        size=12,
+                        size=11,
                         weight=ft.FontWeight.W_600,
                         color=tag_color,
                     ),
                 ],
             ),
-            bgcolor=ft.Colors.with_opacity(0.14, tag_color),
-            border=ft.Border.all(width=1, color=ft.Colors.with_opacity(0.4, tag_color)),
-            padding=ft.Padding(left=8, top=3, right=8, bottom=3),
-            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.12, tag_color),
+            border=ft.Border.all(width=1, color=ft.Colors.with_opacity(0.35, tag_color)),
+            padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+            border_radius=6,
         )
 
-        # Scheduled date badge
-        sched_badge = ft.Container(
-            content=ft.Row(
-                spacing=5,
-                tight=True,
-                controls=[
-                    ft.Icon(sched_icon, size=14, color=sched_color),
-                    ft.Text(
-                        f"План: {sched_str}",
-                        size=12,
-                        weight=ft.FontWeight.W_600,
-                        color=sched_color,
-                    ),
-                ],
-            ),
-            bgcolor=ft.Colors.with_opacity(0.12, sched_color),
-            border=ft.Border.all(width=1, color=ft.Colors.with_opacity(0.35, sched_color)),
-            padding=ft.Padding(left=8, top=3, right=8, bottom=3),
-            border_radius=8,
-        )
-
-        # Time chip
-        time_chip = ft.Container(
-            content=ft.Row(
-                spacing=5,
-                tight=True,
-                controls=[
-                    ft.Icon(
-                        ft.Icons.ACCESS_TIME_FILLED_ROUNDED,
-                        size=14,
-                        color=ft.Colors.CYAN_300,
-                    ),
-                    ft.Text(
-                        f"Время: {time_str}",
-                        size=12,
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.CYAN_200,
-                    ),
-                ],
-            ),
-            bgcolor=ft.Colors.with_opacity(0.15, ft.Colors.CYAN_400),
-            padding=ft.Padding(left=8, top=3, right=8, bottom=3),
-            border_radius=8,
-        )
-
-        subtitle_rows: list[ft.Control] = [
-            ft.Row(
-                spacing=8,
-                wrap=True,
-                controls=[tag_badge, sched_badge, time_chip],
-            )
-        ]
-
-        if task.description:
-            subtitle_rows.append(
-                ft.Text(
-                    task.description,
-                    size=13,
-                    color=ft.Colors.GREY_500 if is_completed else ft.Colors.GREY_400,
-                    max_lines=2,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                )
-            )
-
-        footer_controls: list[ft.Control] = [
-            # Priority Badge
-            ft.Row(
-                [
-                    ft.Icon(
-                        ft.Icons.FLAG_ROUNDED,
-                        size=16,
-                        color=ft.Colors.GREY_500 if is_completed else priority_color,
-                    ),
-                    ft.Text(
-                        f"Приоритет: {priority_label}",
-                        size=12,
-                        color=ft.Colors.GREY_500 if is_completed else priority_color,
-                        weight=ft.FontWeight.W_600,
-                    ),
-                ],
-                spacing=4,
-            ),
-            # Deadline
-            ft.Row(
-                [
-                    ft.Icon(
-                        ft.Icons.CALENDAR_MONTH_ROUNDED,
-                        size=16,
-                        color=ft.Colors.GREY_500 if is_completed else deadline_color,
-                    ),
-                    ft.Text(
-                        f"Дедлайн: {deadline_str}",
-                        size=12,
-                        color=ft.Colors.GREY_500 if is_completed else deadline_color,
-                    ),
-                ],
-                spacing=4,
-            ),
-        ]
-
-        # Add AI predicted time tag if available
-        if ai_pred_str and not is_completed:
-            footer_controls.append(
-                ft.Row(
-                    [
-                        ft.Icon(
-                            ft.Icons.AUTO_AWESOME_ROUNDED,
-                            size=16,
-                            color=ft.Colors.AMBER_400,
-                        ),
-                        ft.Text(
-                            f"Прогноз ИИ: {ai_pred_str}",
-                            size=12,
-                            color=ft.Colors.AMBER_300,
-                            weight=ft.FontWeight.W_500,
-                        ),
-                    ],
-                    spacing=4,
-                )
-            )
-
-        # Title formatting: crossed out if completed
+        # Header controls
         if is_completed:
-            title_control = ft.Text(
+            status_icon = ft.Icon(
+                ft.Icons.CHECK_CIRCLE_ROUNDED,
+                color=ft.Colors.GREEN_400,
+                size=18,
+            )
+            title_text = ft.Text(
                 f"✓ {task.name}",
-                size=16,
+                size=13,
                 weight=ft.FontWeight.W_500,
                 style=ft.TextStyle(
                     decoration=ft.TextDecoration.LINE_THROUGH,
                     color=ft.Colors.GREY_400,
                 ),
+                expand=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
             )
-            leading_control = ft.Container(
-                content=ft.Icon(
-                    ft.Icons.CHECK_CIRCLE_ROUNDED,
-                    color=ft.Colors.GREEN_400,
-                    size=28,
-                ),
-                padding=4,
+            action_btn = ft.IconButton(
+                icon=ft.Icons.RESTORE_ROUNDED,
+                icon_size=18,
+                tooltip="Вернуть в работу",
+                icon_color=ft.Colors.GREY_300,
+                on_click=lambda _, tid=task.id, tname=task.name: self.reopen_task(tid, tname),
             )
-            trailing_control = ft.Container(
-                content=ft.Row(
-                    spacing=4,
-                    tight=True,
-                    controls=[
-                        ft.Icon(ft.Icons.CHECK_ROUNDED, color=ft.Colors.GREEN_300, size=14),
-                        ft.Text("Завершено", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
-                    ],
-                ),
-                bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.GREEN_400),
-                padding=ft.Padding(left=8, top=4, right=8, bottom=4),
-                border_radius=8,
-            )
-            action_buttons_row = ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Row(
-                        spacing=6,
-                        controls=[
-                            ft.Icon(ft.Icons.TASK_ALT_ROUNDED, size=16, color=ft.Colors.GREEN_400),
-                            ft.Text(
-                                "Выполнено сегодня",
-                                size=12,
-                                color=ft.Colors.GREEN_400,
-                                weight=ft.FontWeight.W_600,
-                            ),
-                        ],
-                    ),
-                    ft.TextButton(
-                        "Вернуть в работу",
-                        icon=ft.Icons.RESTORE_ROUNDED,
-                        style=ft.ButtonStyle(
-                            color=ft.Colors.GREY_300,
-                        ) if hasattr(ft, "ButtonStyle") else None,
-                        on_click=lambda _, tid=task.id, tname=task.name: self.reopen_task(tid, tname),
-                    ),
-                ],
+            score_or_status = ft.Container(
+                content=ft.Text("Завершено", size=10, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_300),
+                bgcolor=ft.Colors.with_opacity(0.16, ft.Colors.GREEN_400),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
             )
         else:
-            title_control = ft.Text(
+            status_icon = ft.Icon(
+                priority_icon,
+                color=priority_color,
+                size=18,
+            )
+            title_text = ft.Text(
                 f"#{rank} {task.name}",
-                size=16,
+                size=13,
                 weight=ft.FontWeight.W_600,
                 color=ft.Colors.ON_SURFACE,
+                expand=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
             )
-            leading_control = ft.Container(
-                content=ft.Icon(
-                    priority_icon,
-                    color=priority_color,
-                    size=28,
-                ),
-                padding=4,
+            action_btn = ft.IconButton(
+                icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                icon_size=20,
+                tooltip="Завершить задачу",
+                icon_color=ft.Colors.GREEN_400,
+                on_click=lambda _, tid=task.id, tname=task.name, et=task.expected_time: self.open_complete_dialog(tid, tname, et),
             )
-            trailing_control = ft.Container(
-                content=ft.Text(
-                    f"Вес: {scored.score:.1f}",
-                    size=12,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.WHITE,
-                ),
+            score_or_status = ft.Container(
+                content=ft.Text(f"Вес: {scored.score:.1f}", size=10, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                padding=ft.Padding(left=8, top=4, right=8, bottom=4),
-                border_radius=8,
+                padding=ft.Padding(left=5, top=2, right=5, bottom=2),
+                border_radius=6,
             )
-            action_buttons_row = ft.Row(
-                alignment=ft.MainAxisAlignment.END,
-                controls=[
-                    ft.OutlinedButton(
-                        "Завершить задачу",
-                        icon=ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
-                        style=ft.ButtonStyle(
-                            color=ft.Colors.GREEN_400,
-                        ) if hasattr(ft, "ButtonStyle") else None,
-                        on_click=lambda _, tid=task.id, tname=task.name, et=task.expected_time: self.open_complete_dialog(tid, tname, et),
+
+        header_row = ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                status_icon,
+                title_text,
+                tag_badge,
+                score_or_status,
+                action_btn,
+            ],
+        )
+
+        # Compact Metadata badges in a wrap row
+        metadata_chips: list[ft.Control] = [
+            ft.Container(
+                content=ft.Row(
+                    spacing=3,
+                    tight=True,
+                    controls=[
+                        ft.Icon(sched_icon, size=12, color=sched_color),
+                        ft.Text(f"План: {sched_str}", size=11, color=sched_color, weight=ft.FontWeight.W_500),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.10, sched_color),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    spacing=3,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=12, color=ft.Colors.CYAN_300),
+                        ft.Text(time_str, size=11, color=ft.Colors.CYAN_200, weight=ft.FontWeight.W_600),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.10, ft.Colors.CYAN_400),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    spacing=3,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.FLAG_ROUNDED, size=12, color=ft.Colors.GREY_500 if is_completed else priority_color),
+                        ft.Text(priority_label, size=11, color=ft.Colors.GREY_500 if is_completed else priority_color),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.08, priority_color),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+            ft.Container(
+                content=ft.Row(
+                    spacing=3,
+                    tight=True,
+                    controls=[
+                        ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=12, color=ft.Colors.GREY_500 if is_completed else deadline_color),
+                        ft.Text(f"Дедлайн: {deadline_str}", size=11, color=ft.Colors.GREY_500 if is_completed else deadline_color),
+                    ],
+                ),
+                bgcolor=ft.Colors.with_opacity(0.08, deadline_color),
+                padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                border_radius=6,
+            ),
+        ]
+
+        if ai_pred_str and not is_completed:
+            metadata_chips.append(
+                ft.Container(
+                    content=ft.Row(
+                        spacing=3,
+                        tight=True,
+                        controls=[
+                            ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=12, color=ft.Colors.AMBER_400),
+                            ft.Text(f"ИИ: {ai_pred_str}", size=11, color=ft.Colors.AMBER_300),
+                        ],
                     ),
-                ],
+                    bgcolor=ft.Colors.with_opacity(0.10, ft.Colors.AMBER_400),
+                    padding=ft.Padding(left=6, top=2, right=6, bottom=2),
+                    border_radius=6,
+                )
+            )
+
+        meta_row = ft.Row(
+            spacing=6,
+            run_spacing=4,
+            wrap=True,
+            controls=metadata_chips,
+        )
+
+        card_controls: list[ft.Control] = [header_row, meta_row]
+
+        if task.description:
+            card_controls.append(
+                ft.Text(
+                    task.description,
+                    size=11,
+                    color=ft.Colors.GREY_500 if is_completed else ft.Colors.GREY_400,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                )
             )
 
         return ft.Card(
             elevation=1 if is_completed else 2,
             content=ft.Container(
-                padding=14,
-                border_radius=12,
+                padding=ft.Padding(left=10, top=7, right=8, bottom=7),
+                border_radius=10,
                 ink=True,
-                opacity=0.82 if is_completed else 1.0,
+                opacity=0.78 if is_completed else 1.0,
                 tooltip="Нажмите на карточку, чтобы изменить задачу",
                 on_click=lambda _, t=task: self.open_edit_dialog(t),
                 content=ft.Column(
-                    spacing=12,
-                    controls=[
-                        # Main ListTile with title, leading icon, and score/status
-                        ft.ListTile(
-                            leading=leading_control,
-                            title=title_control,
-                            subtitle=ft.Column(spacing=6, controls=subtitle_rows),
-                            trailing=trailing_control,
-                        ),
-                        ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                        # Metadata footer row: Priority, Deadline, AI Prediction
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                            wrap=True,
-                            spacing=12,
-                            run_spacing=8,
-                            controls=footer_controls,
-                        ),
-                        ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                        # Action button row
-                        action_buttons_row,
-                    ],
+                    spacing=5,
+                    tight=True,
+                    controls=card_controls,
                 ),
             ),
         )
@@ -1011,7 +940,8 @@ class ScheduleScreen:
         today_done = len([s for s in today_tasks if s.task.status == TaskStatus.COMPLETED])
 
         header_actions = ft.Row(
-            spacing=10,
+            spacing=8,
+            wrap=True,
             controls=[
                 ft.OutlinedButton(
                     "Завершить задачи дня",
@@ -1032,6 +962,7 @@ class ScheduleScreen:
         header = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             wrap=True,
+            run_spacing=8,
             controls=[
                 ft.Column(
                     spacing=4,
@@ -1041,19 +972,19 @@ class ScheduleScreen:
                                 ft.Icon(
                                     ft.Icons.TODAY_ROUNDED,
                                     color=ft.Colors.PRIMARY,
-                                    size=28,
+                                    size=24,
                                 ),
                                 ft.Text(
                                     "Сегодняшние задачи",
-                                    size=22,
+                                    size=20,
                                     weight=ft.FontWeight.BOLD,
                                 ),
                             ],
-                            spacing=10,
+                            spacing=8,
                         ),
                         ft.Text(
-                            f"{self._format_today_header()} • К выполнению: {today_active} • Завершено сегодня: {today_done}",
-                            size=13,
+                            f"{self._format_today_header()} • К выполнению: {today_active} • Завершено: {today_done}",
+                            size=12,
                             color=ft.Colors.GREY_400,
                         ),
                     ],
@@ -1155,7 +1086,8 @@ class ScheduleScreen:
         all_done_today = len([s for s in all_tasks_scored if s.task.status == TaskStatus.COMPLETED])
 
         header_actions = ft.Row(
-            spacing=10,
+            spacing=8,
+            wrap=True,
             controls=[
                 ft.OutlinedButton(
                     "Завершить все задачи",
@@ -1176,6 +1108,7 @@ class ScheduleScreen:
         header = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             wrap=True,
+            run_spacing=8,
             controls=[
                 ft.Column(
                     spacing=4,
@@ -1185,19 +1118,19 @@ class ScheduleScreen:
                                 ft.Icon(
                                     ft.Icons.CHECKLIST_ROUNDED,
                                     color=ft.Colors.PRIMARY,
-                                    size=28,
+                                    size=24,
                                 ),
                                 ft.Text(
                                     "Все задачи",
-                                    size=22,
+                                    size=20,
                                     weight=ft.FontWeight.BOLD,
                                 ),
                             ],
-                            spacing=10,
+                            spacing=8,
                         ),
                         ft.Text(
                             f"Активных задач: {all_active} • Завершено сегодня: {all_done_today}",
-                            size=13,
+                            size=12,
                             color=ft.Colors.GREY_400,
                         ),
                     ],
@@ -1437,11 +1370,33 @@ class ScheduleScreen:
         else:
             self.content_area.content = self._render_tags_view()
 
+    def _handle_page_resize(self, e: ft.ControlEvent | None = None) -> None:
+        """Handle screen resizing adaptively for various screen dimensions."""
+        width = getattr(self.page, "width", None) or 1000
+        # Adaptive page padding based on screen width
+        if width < 600:
+            self.page.padding = 6
+        elif width < 900:
+            self.page.padding = 10
+        else:
+            self.page.padding = 14
+
+        # Auto-collapse sidebar on narrow screens (< 768px)
+        if width < 768 and not self.sidebar_collapsed:
+            self.sidebar_collapsed = True
+            self.sidebar_area.width = self.COLLAPSED_SIDEBAR_WIDTH
+            self._drag_width = float(self.COLLAPSED_SIDEBAR_WIDTH)
+            self._render_sidebar()
+            self._update_resizer_button()
+
+        self.page.update()
+
     def render(self) -> None:
         """Assemble the complete layout (sidebar + content) on the page."""
         self.page.title = "Умное расписание"
         self.page.theme_mode = ft.ThemeMode.DARK
-        self.page.padding = 16
+        self.page.padding = 14
+        self.page.on_resize = self._handle_page_resize
 
         self._render_sidebar()
         self._render_content()
@@ -1461,6 +1416,7 @@ class ScheduleScreen:
                 ],
             )
         )
+        self._handle_page_resize()
         self.page.update()
 
     def refresh(self) -> None:
