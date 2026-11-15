@@ -98,7 +98,17 @@ class ScheduleScreen:
         self.all_tasks_column = ft.ListView(spacing=8, expand=True)
         self.tags_column = ft.ListView(spacing=8, expand=True)
         self.archive_column = ft.ListView(spacing=8, expand=True)
-        self.content_area = ft.Container(expand=True)
+
+        # Main content area with fast animated transition switcher (180ms fade) to hide page loads
+        self.content_area = ft.AnimatedSwitcher(
+            content=ft.Container(expand=True),
+            transition=ft.AnimatedSwitcherTransition.FADE,
+            duration=180,
+            reverse_duration=120,
+            switch_in_curve=ft.AnimationCurve.EASE_OUT,
+            switch_out_curve=ft.AnimationCurve.EASE_IN,
+            expand=True,
+        )
         self.sidebar_area = ft.Container(
             width=self.DEFAULT_EXPANDED_WIDTH,
             on_click=lambda _: self.close_right_panel() if self.right_panel_open else None,
@@ -107,6 +117,7 @@ class ScheduleScreen:
         # Tab view caching for zero-lag 0ms tab switching
         self._tab_views: dict[int, ft.Control] = {}
         self._dirty_tabs: set[int] = {0, 1, 2, 3}
+        self._tab_versions: dict[int, int] = {0: 0, 1: 0, 2: 0, 3: 0}
         self._nav_btn_containers: dict[int, ft.Container] = {}
         self._task_card_containers: dict[int, ft.Container] = {}
         self._tag_card_containers: dict[int, ft.Container] = {}
@@ -554,6 +565,7 @@ class ScheduleScreen:
                     alignment=ft.Alignment(0, 0),
                     tooltip=f"{title} ({badge_text})" if badge_text else title,
                     ink=True,
+                    animate=150,
                     on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
                 )
 
@@ -595,6 +607,7 @@ class ScheduleScreen:
                 border_radius=10,
                 padding=ft.Padding(left=12, top=10, right=12, bottom=10),
                 ink=True,
+                animate=150,
                 on_click=lambda _, idx=tab_idx: self.switch_tab(idx),
             )
 
@@ -2463,6 +2476,10 @@ class ScheduleScreen:
             bottom=0,
             width=self.right_panel_width,
             visible=False,
+            opacity=0.0,
+            offset=ft.Offset(0.08, 0),
+            animate_opacity=180,
+            animate_offset=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
             bgcolor=ft.Colors.with_opacity(0.70, "#161822"),
             blur=ft.Blur(20, 20, ft.BlurTileMode.CLAMP),
             border=ft.Border(
@@ -2488,6 +2505,8 @@ class ScheduleScreen:
             right=0,
             bottom=0,
             visible=False,
+            opacity=0.0,
+            animate_opacity=150,
             bgcolor=ft.Colors.with_opacity(0.35, ft.Colors.BLACK),
             blur=ft.Blur(4, 4, ft.BlurTileMode.CLAMP),
             on_click=lambda _: self.close_right_panel(),
@@ -3094,7 +3113,10 @@ class ScheduleScreen:
         self.right_panel_container.width = min(420, max(300, w - 60))
         self._render_right_tag_panel_content(tag)
         self.right_panel_barrier.visible = True
+        self.right_panel_barrier.opacity = 1.0
         self.right_panel_container.visible = True
+        self.right_panel_container.offset = ft.Offset(0, 0)
+        self.right_panel_container.opacity = 1.0
 
         if prev_id and prev_id in self._tag_card_containers:
             self._tag_card_containers[prev_id].border = None
@@ -3114,7 +3136,10 @@ class ScheduleScreen:
         self.right_panel_container.width = min(420, max(300, w - 60))
         self._render_right_panel_content(task)
         self.right_panel_barrier.visible = True
+        self.right_panel_barrier.opacity = 1.0
         self.right_panel_container.visible = True
+        self.right_panel_container.offset = ft.Offset(0, 0)
+        self.right_panel_container.opacity = 1.0
 
         if prev_id and prev_id in self._task_card_containers:
             self._task_card_containers[prev_id].border = None
@@ -3133,7 +3158,10 @@ class ScheduleScreen:
         self.selected_task_id = None
         self.selected_tag_id = None
         self.right_panel_barrier.visible = False
+        self.right_panel_barrier.opacity = 0.0
         self.right_panel_container.visible = False
+        self.right_panel_container.offset = ft.Offset(0.08, 0)
+        self.right_panel_container.opacity = 0.0
         self.page.update()
 
     def toggle_right_panel(self, task: Task | None = None, tag: Subject | None = None) -> None:
@@ -3154,7 +3182,10 @@ class ScheduleScreen:
                     self.right_panel_mode = "tag"
                     self.right_panel_open = True
                     self.right_panel_barrier.visible = True
+                    self.right_panel_barrier.opacity = 1.0
                     self.right_panel_container.visible = True
+                    self.right_panel_container.offset = ft.Offset(0, 0)
+                    self.right_panel_container.opacity = 1.0
                     self._render_right_tag_panel_content(None)
                     self.page.update()
             elif self.selected_task_id:
@@ -3174,7 +3205,10 @@ class ScheduleScreen:
                         self.right_panel_mode = "task"
                         self.right_panel_open = True
                         self.right_panel_barrier.visible = True
+                        self.right_panel_barrier.opacity = 1.0
                         self.right_panel_container.visible = True
+                        self.right_panel_container.offset = ft.Offset(0, 0)
+                        self.right_panel_container.opacity = 1.0
                         self._render_right_panel_content(None)
                         self.page.update()
 
@@ -3184,6 +3218,10 @@ class ScheduleScreen:
     def _get_or_build_tab_view(self, tab_idx: int) -> ft.Control:
         """Return the pre-rendered tab view or build it if dirty/missing."""
         if tab_idx in self._dirty_tabs or tab_idx not in self._tab_views:
+            if not hasattr(self, "_tab_versions"):
+                self._tab_versions = {0: 0, 1: 0, 2: 0, 3: 0}
+            self._tab_versions[tab_idx] = self._tab_versions.get(tab_idx, 0) + 1
+
             if tab_idx == 0:
                 view = self._render_today_tasks_view()
             elif tab_idx == 1:
@@ -3193,6 +3231,7 @@ class ScheduleScreen:
             else:
                 view = self._render_archive_view()
 
+            view.key = f"tab_view_{tab_idx}_v{self._tab_versions[tab_idx]}"
             self._tab_views[tab_idx] = view
             self._dirty_tabs.discard(tab_idx)
 
